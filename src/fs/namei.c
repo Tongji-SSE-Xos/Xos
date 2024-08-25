@@ -9,14 +9,12 @@
 
 #define LOGK(fmt, args...) DEBUGK(fmt, ##args)
 
-// 判断文件名是否相等
-bool match_name(const char *name, const char *entry_name, char **next, int count)
-{
-    char *lhs = (char *)name;
-    char *rhs = (char *)entry_name;
+// 匹配并更新路径
+static inline bool match_and_advance(const char **name, const char *entry_name, char **next, int count) {
+    const char *lhs = *name;
+    const char *rhs = entry_name;
 
-    while (*lhs == *rhs && *lhs != EOS && *rhs != EOS && count--)
-    {
+    while (*lhs == *rhs && *lhs != EOS && *rhs != EOS && count--) {
         lhs++;
         rhs++;
     }
@@ -27,50 +25,27 @@ bool match_name(const char *name, const char *entry_name, char **next, int count
         return false;
     if (IS_SEPARATOR(*lhs))
         lhs++;
-    *next = lhs;
+    *next = (char *)lhs;
     return true;
 }
 
-// 获取 pathname 对应的父目录 inode
-inode_t *named(char *pathname, char **next)
-{
+// 获取父目录 inode
+static inline inode_t *get_parent_inode(task_t *task, char **name) {
     inode_t *dir = NULL;
-    task_t *task = running_task();
-    char *name = pathname;
-    if (IS_SEPARATOR(name[0]))
-    {
+    if (IS_SEPARATOR((*name)[0])) {
         dir = task->iroot;
-        name++;
-    }
-    else if (name[0])
+        (*name)++;
+    } else if ((*name)[0]) {
         dir = task->ipwd;
-    else
-        return NULL;
-
-    assert(dir->dev > 0);
-
-    dir->count++;
-    *next = name;
-
-    if (!*name)
-    {
-        return dir;
     }
+    return dir;
+}
 
-    char *right = strrsep(name);
-    if (!right || right < name)
-    {
-        return dir;
-    }
-
-    right++;
-
+// 查找和匹配 inode
+static inode_t *find_and_match_inode(inode_t *dir, char *name, char **next, char *right) {
     inode_t *inode = NULL;
-    while (true)
-    {
-        // 返回上一级目录且上一级目录是个挂载点
-        if (match_name(name, "..", next, 3) && dir == dir->super->iroot)
-        {
+    while (true) {
+        if (match_and_advance(&name, "..", next, 3) && dir == dir->super->iroot) {
             super_t *super = dir->super;
             inode = super->imount;
             inode->count++;
@@ -79,44 +54,61 @@ inode_t *named(char *pathname, char **next)
         }
 
         int ret = dir->op->namei(dir, name, next, &inode);
-        if (ret < EOK)
-            goto rollback;
+        if (ret < EOK) {
+            iput(dir);
+            return NULL;
+        }
 
         iput(dir);
         dir = inode;
 
-        if (!ISDIR(dir->mode) || !dir->op->permission(dir, P_EXEC))
-            goto rollback;
+        if (!ISDIR(dir->mode) || !dir->op->permission(dir, P_EXEC)) {
+            iput(dir);
+            return NULL;
+        }
 
-        if (right == *next)
-        {
+        if (right == *next) {
             return dir;
         }
         name = *next;
     }
+}
 
-rollback:
-    iput(dir);
-    return NULL;
+// 获取 pathname 对应的父目录 inode
+inode_t *named(char *pathname, char **next) {
+    task_t *task = running_task();
+    char *name = pathname;
+    inode_t *dir = get_parent_inode(task, &name);
+
+    if (!dir) return NULL;
+
+    dir->count++;
+    *next = name;
+
+    if (!*name) {
+        return dir;
+    }
+
+    char *right = strrsep(name);
+    if (!right || right < name) {
+        return dir;
+    }
+    right++;
+
+    return find_and_match_inode(dir, name, next, right);
 }
 
 // 获取 pathname 对应的 inode
-inode_t *namei(char *pathname)
-{
+inode_t *namei(char *pathname) {
     char *next = NULL;
     inode_t *dir = named(pathname, &next);
-    if (!dir)
-        return NULL;
+    if (!dir) return NULL;
 
-    if (!(*next))
-        return dir;
+    if (!(*next)) return dir;
 
-    char *name = next;
     inode_t *inode = NULL;
 
-    // 返回上一级目录且上一级目录是个挂载点
-    if (match_name(name, "..", &next, 3) && dir == dir->super->iroot)
-    {
+    if (match_and_advance(&next, "..", &next, 3) && dir == dir->super->iroot) {
         super_t *super = dir->super;
         inode = super->imount;
         inode->count++;
@@ -124,8 +116,7 @@ inode_t *namei(char *pathname)
         dir = inode;
     }
 
-    int ret = dir->op->namei(dir, name, &next, &inode);
-
+    int ret = dir->op->namei(dir, next, &next, &inode);
     iput(dir);
-    return inode;
+    return (ret < EOK) ? NULL : inode;
 }
