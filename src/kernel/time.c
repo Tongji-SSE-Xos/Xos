@@ -9,7 +9,7 @@
 #define CMOS_SECOND 0x00  // (0 ~ 59)
 #define CMOS_MINUTE 0x02  // (0 ~ 59)
 #define CMOS_HOUR 0x04    // (0 ~ 23)
-#define CMOS_WEEKDAY 0x06 // (1 ~ 7) 星期天 = 1，星期六 = 7
+#define CMOS_WEEKDAY 0x06 // (1 ~ 7)
 #define CMOS_DAY 0x07     // (1 ~ 31)
 #define CMOS_MONTH 0x08   // (1 ~ 12)
 #define CMOS_YEAR 0x09    // (0 ~ 99)
@@ -25,29 +25,24 @@
 static int month[13] = {
     0, // 这里占位，没有 0 月，从 1 月开始
     0,
-    (31),
-    (31 + 29),
-    (31 + 29 + 31),
-    (31 + 29 + 31 + 30),
-    (31 + 29 + 31 + 30 + 31),
-    (31 + 29 + 31 + 30 + 31 + 30),
-    (31 + 29 + 31 + 30 + 31 + 30 + 31),
-    (31 + 29 + 31 + 30 + 31 + 30 + 31 + 31),
-    (31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30),
-    (31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31),
-    (31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30)};
+    31,
+    31 + 29,
+    31 + 29 + 31,
+    31 + 29 + 31 + 30,
+    31 + 29 + 31 + 30 + 31,
+    31 + 29 + 31 + 30 + 31 + 30,
+    31 + 29 + 31 + 30 + 31 + 30 + 31,
+    31 + 29 + 31 + 30 + 31 + 30 + 31 + 31,
+    31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30,
+    31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31,
+    31 + 29 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30};
 
 time_t startup_time;
 int century;
 
 int elapsed_leap_years(int year)
 {
-    int result = 0;
-    result += (year - 1) / 4;
-    result -= (year - 1) / 100;
-    result += (year + 299) / 400;
-    result -= (1970 - 1900) / 4;
-    return result;
+    return ((year - 1) / 4) - ((year - 1) / 100) + ((year + 299) / 400) - ((1970 - 1900) / 4);
 }
 
 bool is_leap_year(int year)
@@ -58,7 +53,6 @@ bool is_leap_year(int year)
 void localtime(time_t stamp, tm *time)
 {
     time->tm_sec = stamp % 60;
-
     time_t remain = stamp / 60;
 
     time->tm_min = remain % 60;
@@ -69,24 +63,21 @@ void localtime(time_t stamp, tm *time)
 
     time->tm_wday = (days + 4) % 7; // 1970-01-01 是星期四
 
-    // 这里产生误差显然需要 365 个闰年，不管了
     int years = days / 365 + 70;
     time->tm_year = years;
     int offset = 1;
-    if (is_leap_year(years))
-        offset = 0;
+    int offset = is_leap_year(years) ? 0 : 1;
 
     days -= elapsed_leap_years(years);
     time->tm_yday = days % (366 - offset);
 
-    int mon = 1;
-    for (; mon < 13; mon++)
+    int month_index = 1;
+    while (month_index < 13 && month[month_index] - offset <= time->tm_yday)
     {
-        if ((month[mon] - offset) > time->tm_yday)
-            break;
+        month_index++;
     }
 
-    time->tm_mon = mon - 1;
+    time->tm_mon = month_index - 1;
     time->tm_mday = time->tm_yday - month[time->tm_mon] + offset + 1;
 }
 
@@ -94,14 +85,12 @@ void localtime(time_t stamp, tm *time)
 // 与系统具体时区相关，不过也不要紧，顶多差几个小时
 time_t mktime(tm *time)
 {
-    time_t res;
-    int year; // 1970 年开始的年数
-    // 下面从 1900 年开始的年数计算
-    if (time->tm_year >= 70)
-        year = time->tm_year - 70;
-    else
-        year = time->tm_year - 70 + 100;
+    
+    int year = time->tm_year >= 70 ? time->tm_year - 70 : time->tm_year - 70 + 100;
 
+    time_t seconds = YEAR * year;
+    seconds += DAY * (year / 4);
+    seconds += month[time->tm_mon] * DAY;
     // 这些年经过的秒数时间
     res = YEAR * year;
 
@@ -112,43 +101,34 @@ time_t mktime(tm *time)
     res += month[time->tm_mon] * DAY;
 
     // 如果 2 月已经过了，并且当前不是闰年，那么减去一天
-    if (time->tm_mon > 2 && ((year + 2) % 4))
-        res -= DAY;
+    if (time->tm_mon > 2 && !is_leap_year(year + 1900))
+    {
+        seconds -= DAY;
+    }
 
-    // 这个月已经过去的天
-    res += DAY * (time->tm_mday - 1);
+    seconds += DAY * (time->tm_mday - 1);
+    seconds += HOUR * time->tm_hour;
+    seconds += MINUTE * time->tm_min;
+    seconds += time->tm_sec;
 
-    // 今天过去的小时
-    res += HOUR * time->tm_hour;
-
-    // 这个小时过去的分钟
-    res += MINUTE * time->tm_min;
-
-    // 这个分钟过去的秒
-    res += time->tm_sec;
-
-    return res;
+    return seconds;
 }
 
 int get_yday(tm *time)
 {
-    int res = month[time->tm_mon]; // 已经过去的月的天数
-    res += time->tm_mday;          // 这个月过去的天数
+    int days = month[time->tm_mon] + time->tm_mday;
+    days += time->tm_mday;          // 这个月过去的天数
 
-    int year;
-    if (time->tm_year >= 70)
-        year = time->tm_year - 70;
-    else
-        year = time->tm_year - 70 + 100;
+    int year = time->tm_year >= 70 ? time->tm_year - 70 : time->tm_year - 70 + 100;
 
     // 如果不是闰年，并且 2 月已经过去了，则减去一天
     // 注：1972 年是闰年，这样算不太精确，忽略了 100 年的平年
-    if ((year + 2) % 4 && time->tm_mon > 2)
+    if (!is_leap_year(year + 1900) && time->tm_mon > 2)
     {
-        res -= 1;
+        days -= 1;
     }
 
-    return res;
+    return days;
 }
 
 void time_read_bcd(tm *time)
