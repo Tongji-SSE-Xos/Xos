@@ -5,6 +5,7 @@
 #define COM1_IOBASE 0x3F8 // 串口 1 基地址
 #define COM2_IOBASE 0x2F8 // 串口 2 基地址
 
+// 串口寄存器偏移
 #define COM_DATA 0          // 数据寄存器
 #define COM_INTR_ENABLE 1   // 中断允许
 #define COM_BAUD_LSB 0      // 波特率低字节
@@ -15,15 +16,15 @@
 #define COM_LINE_STATUS 5   // 线状态
 #define COM_MODEM_STATUS 6  // 调制解调器状态
 
-// 线状态
-#define LSR_DR 0x1
-#define LSR_OE 0x2
-#define LSR_PE 0x4
-#define LSR_FE 0x8
-#define LSR_BI 0x10
-#define LSR_THRE 0x20
-#define LSR_TEMT 0x40
-#define LSR_IE 0x80
+// 线状态寄存器标志
+#define LSR_DR 0x01  // 数据可读
+#define LSR_OE 0x02  // 溢出错误
+#define LSR_PE 0x04  // 奇偶校验错误
+#define LSR_FE 0x08  // 帧错误
+#define LSR_BI 0x10  // 中断标志
+#define LSR_THRE 0x20 // 发送保持寄存器空
+#define LSR_TEMT 0x40 // 发送移位寄存器空
+#define LSR_IE 0x80  // 中断使能
 
 #define BUF_LEN 64
 
@@ -48,9 +49,9 @@ void recv_data(serial_t *serial)
         ch = '\n';
     }
     fifo_put(&serial->rx_fifo, ch);
-    if (serial->rx_waiter != NULL)
+    if (serial->rx_waiter != NULL) // 读进程不为空
     {
-        task_unblock(serial->rx_waiter, EOK);
+        task_unblock(serial->rx_waiter, EOK); // 解除阻塞
         serial->rx_waiter = NULL;
     }
 }
@@ -70,7 +71,7 @@ void serial_handler(int vector)
         recv_data(serial);
     }
 
-    // 如果可以发送数据，并且写进程阻塞
+    // 发送数据可用且写进程阻塞
     if ((state & LSR_THRE) && serial->tx_waiter)
     {
         task_unblock(serial->tx_waiter, EOK);
@@ -78,41 +79,45 @@ void serial_handler(int vector)
     }
 }
 
+// 读取数据
 int serial_read(serial_t *serial, char *buf, u32 count)
 {
-    lock_acquire(&serial->rlock);
+    lock_acquire(&serial->rlock); // 读锁加锁
     int nr = 0;
     while (nr < count)
     {
-        while (fifo_empty(&serial->rx_fifo))
+        while (fifo_empty(&serial->rx_fifo)) // 为空则阻塞
         {
             assert(serial->rx_waiter == NULL);
             serial->rx_waiter = running_task();
             task_block(serial->rx_waiter, NULL, TASK_BLOCKED, TIMELESS);
         }
-        buf[nr++] = fifo_get(&serial->rx_fifo);
+        buf[nr++] = fifo_get(&serial->rx_fifo); // 不为空则读
     }
-    lock_release(&serial->rlock);
+    lock_release(&serial->rlock); // 读锁释放
     return nr;
 }
 
+// 写数据
 int serial_write(serial_t *serial, char *buf, u32 count)
 {
-    lock_acquire(&serial->wlock);
+    lock_acquire(&serial->wlock); // 写锁加锁
     int nr = 0;
     while (nr < count)
     {
         u8 state = inb(serial->iobase + COM_LINE_STATUS);
-        if (state & LSR_THRE) // 如果串口可写
+        if (state & LSR_THRE) // 串口可写
         {
-            outb(serial->iobase, buf[nr++]);
-            continue;
+            outb(serial->iobase + COM_DATA, buf[nr++]);
         }
-        // task_t *task = running_task();
-        // serial->tx_waiter = task;
-        // task_block(task, NULL, TASK_BLOCKED, TIMELESS);
+        else
+        {
+            // 写进程阻塞处理
+            serial->tx_waiter = running_task();
+            task_block(serial->tx_waiter, NULL, TASK_BLOCKED, TIMELESS);
+        }
     }
-    lock_release(&serial->wlock);
+    lock_release(&serial->wlock); // 写锁释放
     return nr;
 }
 
@@ -121,70 +126,54 @@ void serial_init()
 {
     for (size_t i = 0; i < 2; i++)
     {
-        serial_t *serial = &serials[i];
-        fifo_init(&serial->rx_fifo, serial->rx_buf, BUF_LEN);
-        serial->rx_waiter = NULL;
-        lock_init(&serial->rlock);
-        serial->tx_waiter = NULL;
-        lock_init(&serial->wlock);
+        serial_t *serial = &serials[i]; // 得到串口的结构
+        fifo_init(&serial->rx_fifo, serial->rx_buf, BUF_LEN); // 初始化队列
+        serial->rx_waiter = NULL; // 进程置为空
+        lock_init(&serial->rlock); // 读锁
+        serial->tx_waiter = NULL; // 进程置为空
+        lock_init(&serial->wlock); // 写锁
 
-        u16 irq;
-        if (!i)
+        if (i == 0)
         {
-            irq = IRQ_SERIAL_1;
-            serial->iobase = COM1_IOBASE;
+            serial->iobase = COM1_IOBASE; // 中断号：4
+            set_interrupt_handler(IRQ_SERIAL_1, serial_handler); // 串口 1 的基地址
         }
         else
         {
-            irq = IRQ_SERIAL_2;
-            serial->iobase = COM2_IOBASE;
+            serial->iobase = COM2_IOBASE; // 中断号：3
+            set_interrupt_handler(IRQ_SERIAL_2, serial_handler); // 串口 2 的基地址
         }
 
-        // 禁用中断
-        outb(serial->iobase + COM_INTR_ENABLE, 0);
+        // 初始化串口
+        outb(serial->iobase + COM_INTR_ENABLE, 0); // 禁用中断
 
-        // 激活 DLAB
-        outb(serial->iobase + COM_LINE_CONTROL, 0x80);
+        outb(serial->iobase + COM_LINE_CONTROL, 0x80); // 激活 DLAB
 
-        // 设置波特率因子 0x0030
-        // 波特率为 115200 / 0x30 = 115200 / 48 = 2400
-        outb(serial->iobase + COM_BAUD_LSB, 0x30);
-        outb(serial->iobase + COM_BAUD_MSB, 0x00);
+        outb(serial->iobase + COM_BAUD_LSB, 0x30); // 设置波特率因子低字节
+        outb(serial->iobase + COM_BAUD_MSB, 0x00); // 设置波特率因子高字节
 
-        // 复位 DLAB 位，数据位为 8 位
-        outb(serial->iobase + COM_LINE_CONTROL, 0x03);
+        outb(serial->iobase + COM_LINE_CONTROL, 0x03); // 复位 DLAB 位，数据位为 8 位
 
-        // 启用 FIFO, 清空 FIFO, 14 字节触发电平
-        outb(serial->iobase + COM_INTR_IDENTIFY, 0xC7);
+        outb(serial->iobase + COM_INTR_IDENTIFY, 0xC7); // 启用 FIFO, 清空 FIFO, 14 字节触发电平
 
-        // 设置回环模式，测试串口芯片
-        outb(serial->iobase + COM_MODEM_CONTROL, 0b11011);
-
-        // 发送字节
-        outb(serial->iobase, 0xAE);
+        outb(serial->iobase + COM_MODEM_CONTROL, 0b11011); // 设置回环模式，测试串口芯片
 
         // 收到的内容与发送的不一致，则串口不可用
-        if (inb(serial->iobase) != 0xAE)
+        if (inb(serial->iobase + COM_DATA) != 0xAE)
         {
             continue;
         }
 
-        // 设置回原来的模式
-        outb(serial->iobase + COM_MODEM_CONTROL, 0b1011);
-
-        // 注册中断函数
-        set_interrupt_handler(irq, serial_handler);
+        outb(serial->iobase + COM_MODEM_CONTROL, 0b1011); // 设置回原来的模式
 
         // 打开中断屏蔽
-        set_interrupt_mask(irq, true);
+        set_interrupt_mask(i == 0 ? IRQ_SERIAL_1 : IRQ_SERIAL_2, true);
 
-        // 0x0d = 0b1101
-        // 数据可用 + 中断/错误 + 状态变化 都发送中断
-        outb(serial->iobase + COM_INTR_ENABLE, 0x0F);
+        // 启用中断
+        outb(serial->iobase + COM_INTR_ENABLE, 0x0F); // 数据可用 + 中断/错误 + 状态变化都发送中断
 
         char name[16];
-
-        sprintf(name, "com%d", i + 1);
+        snprintf(name, sizeof(name), "com%d", i + 1);
 
         device_install(
             DEV_CHAR, DEV_SERIAL, serial, name, 0,

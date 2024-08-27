@@ -86,12 +86,10 @@ typedef struct console_t
     u32 width;    // 屏幕宽度
     u32 height;   // 屏幕高度
     u32 row_size; // 行内存大小
-
     u8 state;         // 当前状态
     u32 args[ARG_NR]; // 参数
     u32 argc;         // 参数数量
     u32 ques;         //
-
     u16 erase; // 清屏字符
     u8 style;  // 当前样式
 } console_t;
@@ -101,30 +99,32 @@ static console_t console;
 // 设置当前显示器开始的位置
 static _inline void set_screen(console_t *con)
 {
+    u32 offset = (con->screen - con->mem_base) >> 1;
     outb(CRT_ADDR_REG, CRT_START_ADDR_H); // 开始位置高地址
-    outb(CRT_DATA_REG, ((con->screen - con->mem_base) >> 9) & 0xff);
+    outb(CRT_DATA_REG, (offset >> 8) & 0xff);
     outb(CRT_ADDR_REG, CRT_START_ADDR_L); // 开始位置低地址
-    outb(CRT_DATA_REG, ((con->screen - con->mem_base) >> 1) & 0xff);
+    outb(CRT_DATA_REG, offset & 0xff);
 }
 
 // 设置当前显示器光标位置
 static _inline void set_cursor(console_t *con)
 {
+    u32 offset = (con->pos - con->mem_base) >> 1;
     outb(CRT_ADDR_REG, CRT_CURSOR_H); // 光标高地址
-    outb(CRT_DATA_REG, ((con->pos - con->mem_base) >> 9) & 0xff);
+    outb(CRT_DATA_REG, (offset >> 8) & 0xff);
     outb(CRT_ADDR_REG, CRT_CURSOR_L); // 光标低地址
-    outb(CRT_DATA_REG, ((con->pos - con->mem_base) >> 1) & 0xff);
+    outb(CRT_DATA_REG, offset & 0xff);
 }
 
 // 设置光标位置
 static _inline void set_xy(console_t *con, u32 x, u32 y)
 {
-    if (x > con->width || y >= con->height)
-        return;
-    con->x = x;
-    con->y = y;
-    con->pos = con->screen + y * con->row_size + (x << 1);
-    // set_cursor(con);
+    if (x < con->width && y < con->height)
+    {
+        con->x = x;
+        con->y = y;
+        con->pos = con->screen + y * con->row_size + (x << 1);
+    }
 }
 
 // 保存光标位置
@@ -137,8 +137,7 @@ static _inline void save_cursor(console_t *con)
 // 清除屏幕
 static _inline void erase_screen(console_t *con, u16 *start, u32 count)
 {
-    int nr = 0;
-    while (nr++ < count)
+    while (count--)
     {
         *start++ = con->erase;
     }
@@ -192,9 +191,11 @@ static _inline void lf(console_t *con)
     {
         con->y++;
         con->pos += con->row_size;
-        return;
     }
-    scroll_up(con);
+    else
+    {
+        scroll_up(con);
+    }
 }
 
 // 光标回到开始位置
@@ -221,11 +222,12 @@ static _inline void tab(console_t *con)
 // 退格
 static _inline void bs(console_t *con)
 {
-    if (!con->x)
-        return;
-    con->x--;
-    con->pos -= 2;
-    *(u16 *)con->pos = con->erase;
+    if (con->x > 0)
+    {
+        con->x--;
+        con->pos -= 2;
+        *(u16 *)con->pos = con->erase;
+    }
 }
 
 // 删除当前字符
@@ -252,45 +254,45 @@ static _inline void chr(console_t *con, char ch)
 extern void start_beep();
 
 // 正常状态
-static _inline void state_normal(console_t *con, char ch)
+static inline void state_normal(console_t *con, char ch)
 {
     switch (ch)
     {
-    case NUL:
+    case NUL: 
         break;
-    case BEL:
-        start_beep();
+    case BEL: 
+        start_beep(); 
         break;
-    case BS:
-        bs(con);
+    case BS: 
+        bs(con); 
         break;
-    case HT:
-        tab(con);
+    case HT: 
+        tab(con); 
         break;
-    case LF:
-        lf(con);
-        cr(con);
+    case LF: 
+        lf(con); 
+        cr(con); 
         break;
     case VT:
-    case FF:
-        lf(con);
+    case FF: 
+        lf(con); 
         break;
-    case CR:
-        cr(con);
+    case CR: 
+        cr(con); 
         break;
-    case DEL:
-        del(con);
+    case DEL: 
+        del(con); 
         break;
-    case ESC:
-        con->state = STATE_ESC;
+    case ESC: 
+        con->state = STATE_ESC; 
         break;
-    default:
-        chr(con, ch);
+    default: 
+        chr(con, ch); 
         break;
     }
 }
 
-// esc 状态
+// ESC 状态
 static _inline void state_esc(console_t *con, char ch)
 {
     switch (ch)
@@ -303,13 +305,13 @@ static _inline void state_esc(console_t *con, char ch)
         cr(con);
         break;
     case 'M':
-        // go up
+        // 上移一行
         break;
     case 'D':
         lf(con);
         break;
     case 'Z':
-        // response
+        // 响应
         break;
     case '7':
         save_cursor(con);
@@ -327,6 +329,7 @@ static _inline bool state_arg(console_t *con, char ch)
 {
     if (con->argc >= ARG_NR)
         return false;
+
     if (ch == ';')
     {
         con->argc++;
@@ -334,7 +337,7 @@ static _inline bool state_arg(console_t *con, char ch)
     }
     if (ch >= '0' && ch <= '9')
     {
-        con->args[con->argc] = con->args[con->argc] * 10 + ch - '0';
+        con->args[con->argc] = con->args[con->argc] * 10 + (ch - '0');
         return false;
     }
     con->argc++;
@@ -349,15 +352,15 @@ static _inline void csi_J(console_t *con)
     int start = 0;
     switch (con->args[0])
     {
-    case 0: // 擦除屏幕中光标后面的部分
+    case 0: // 擦除光标后的部分
         count = (con->screen + con->scr_size - con->pos) >> 1;
         start = con->pos;
         break;
-    case 1: // 擦除屏幕中光标前面的部分
+    case 1: // 擦除光标前的部分
         count = (con->pos - con->screen) >> 1;
         start = con->screen;
         break;
-    case 2: // 整个屏幕上的字符
+    case 2: // 擦除整个屏幕
         count = con->scr_size >> 1;
         start = con->screen;
         break;
@@ -375,11 +378,11 @@ static _inline void csi_K(console_t *con)
     int start = 0;
     switch (con->args[0])
     {
-    case 0: // 删除行光标后
+    case 0: // 删除光标后的部分
         count = con->width - con->x;
         start = con->pos;
         break;
-    case 1: // 删除行光标前
+    case 1: // 删除光标前的部分
         count = con->x;
         start = con->pos - (con->x << 1);
         break;
@@ -456,8 +459,7 @@ static _inline void csi_M(console_t *con)
 static _inline void delete_char(console_t *con)
 {
     u16 *ptr = (u16 *)con->ptr;
-    u16 i = con->x;
-    while (++i < con->width)
+    for (u16 i = con->x; i < con->width - 1; i++)
     {
         *ptr = *(ptr + 1);
         ptr++;
@@ -483,7 +485,7 @@ static _inline void csi_P(console_t *con)
 static _inline void insert_char(console_t *con)
 {
     u16 *ptr = (u16 *)con->ptr + (con->width - con->x - 1);
-    while (ptr > (u16 *)con->ptr)
+    for (u16 i = con->width - 1; i > con->x; i--)
     {
         *ptr = *(ptr - 1);
         ptr--;
@@ -511,23 +513,27 @@ static _inline void csi_m(console_t *con)
     con->style = 0;
     for (size_t i = 0; i < con->argc; i++)
     {
-        if (con->args[i] == ST_NORMAL)
+        switch (con->args[i])
+        {
+        case ST_NORMAL:
             con->style = STYLE;
-
-        else if (con->args[i] == ST_BOLD)
+            break;
+        case ST_BOLD:
             con->style = BOLD;
-
-        else if (con->args[i] == BLINK)
+            break;
+        case BLINK:
             con->style |= BLINK;
-
-        else if (con->args[i] == ST_REVERSE)
+            break;
+        case ST_REVERSE:
             con->style = (con->style >> 4) | (con->style << 4);
-
-        else if (con->args[i] >= 30 && con->args[i] <= 37)
-            con->style = con->style & 0xF8 | (con->args[i] - 30);
-
-        else if (con->args[i] >= 40 && con->args[i] <= 47)
-            con->style = con->style & 0x8F | ((con->args[i] - 40) << 4);
+            break;
+        default:
+            if (con->args[i] >= 30 && con->args[i] <= 37)
+                con->style = (con->style & 0xF8) | (con->args[i] - 30);
+            else if (con->args[i] >= 40 && con->args[i] <= 47)
+                con->style = (con->style & 0x8F) | ((con->args[i] - 40) << 4);
+            break;
+        }
     }
     con->erase = (con->style << 8) | 0x20;
 }
@@ -544,34 +550,34 @@ static _inline void state_csi(console_t *con, char ch)
             con->args[0]--;
         set_xy(con, con->args[0], con->y);
         break;
-    case 'A': // 光标上移一行或 n 行
+    case 'A': // 光标上移
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, con->x, con->y - con->args[0]);
         break;
     case 'B':
-    case 'e': // 光标下移一行或 n 行
+    case 'e': // 光标下移
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, con->x, con->y + con->args[0]);
         break;
     case 'C':
-    case 'a': // 光标右移一列或 n 列
+    case 'a': // 光标右移
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, con->x + con->args[0], con->y);
         break;
-    case 'D': // 光标左移一列或 n 列
+    case 'D': // 光标左移
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, con->x - con->args[0], con->y);
         break;
-    case 'E': // 光标下移一行或 n 行，并回到 0 列
+    case 'E': // 光标下移并回到0列
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, 0, con->y + con->args[0]);
         break;
-    case 'F': // 光标上移一行或 n 行，并回到 0 列
+    case 'F': // 光标上移并回到0列
         if (!con->args[0])
             con->args[0]++;
         set_xy(con, 0, con->y - con->args[0]);
@@ -614,8 +620,10 @@ static _inline void state_csi(console_t *con, char ch)
         break;
     case 's':
         save_cursor(con);
+        break;
     case 'u':
         set_xy(con, con->saved_x, con->saved_y);
+        break;
     default:
         break;
     }
@@ -626,7 +634,6 @@ int console_write(console_t *con, char *buf, u32 count)
 {
     bool intr = interrupt_disable(); // 禁止中断
 
-    // console_t *con = &console;
     char ch;
     int nr = 0;
     while (nr++ < count)
@@ -658,28 +665,28 @@ int console_write(console_t *con, char *buf, u32 count)
         }
     }
     set_cursor(con);
-    // 恢复中断
-    set_interrupt_state(intr);
+    set_interrupt_state(intr); // 恢复中断
     return nr;
 }
 
+// console 初始化
 void console_init()
 {
     console_t *con = &console;
-    con->mem_base = MEM_BASE;
-    con->mem_size = (MEM_SIZE / ROW_SIZE) * ROW_SIZE;
-    con->mem_end = con->mem_base + con->mem_size;
-    con->width = WIDTH;
-    con->height = HEIGHT;
-    con->row_size = con->width * 2;
-    con->scr_size = con->width * con->height * 2;
+    con->mem_base = MEM_BASE; // 内存位置
+    con->mem_size = (MEM_SIZE / ROW_SIZE) * ROW_SIZE; // 内存大小
+    con->mem_end = con->mem_base + con->mem_size; // 内存结束位置
+    con->width = WIDTH; // 宽度
+    con->height = HEIGHT; // 高度
+    con->row_size = con->width * 2; // 行大小
+    con->scr_size = con->width * con->height * 2; // 屏幕大小
 
-    con->erase = ERASE;
-    con->style = STYLE;
-    console_clear(con);
+    con->erase = ERASE; // 清屏字符
+    con->style = STYLE; // 默认样式
+    console_clear(con); // 清屏
 
     device_install(
-        DEV_CHAR, DEV_CONSOLE,
-        con, "console", 0,
-        NULL, NULL, console_write);
+        DEV_CHAR, DEV_CONSOLE, // 字符设备 控制台
+        con, "console", 0, // 指针 设别名“console” 设备0
+        NULL, NULL, console_write); // 读函数为空 写函数非空（即控制台值可以写）
 }

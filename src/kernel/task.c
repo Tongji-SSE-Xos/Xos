@@ -16,6 +16,9 @@ static list_t sleep_list;    // 任务睡眠链表
 
 static task_t *idle_task;
 
+extern int sys_execve();
+extern int init_user_thread();
+
 // 从 task_table 里获得一个空闲的任务
 static task_t *get_free_task()
 {
@@ -70,15 +73,11 @@ static task_t *task_search(task_state_t state)
     for (size_t i = 0; i < TASK_NR; i++)
     {
         task_t *ptr = task_table[i];
-        if (ptr == NULL)
-            continue;
-
-        if (ptr->state != state)
-            continue;
-        if (current == ptr)
-            continue;
-        if (task == NULL || task->ticks < ptr->ticks || ptr->jiffies < task->jiffies)
-            task = ptr;
+        if (ptr && ptr->state == state && ptr != current)
+        {
+            if (task == NULL || task->ticks < ptr->ticks || ptr->jiffies < task->jiffies)
+                task = ptr;
+        }
     }
 
     if (task == NULL && state == TASK_READY)
@@ -103,8 +102,7 @@ bool _inline task_leader(task_t *task)
 err_t task_block(task_t *task, list_t *blist, task_state_t state, int timeout_ms)
 {
     assert(!get_interrupt_state());
-    assert(task->node.next == NULL);
-    assert(task->node.prev == NULL);
+    assert(task->node.next == NULL && task->node.prev == NULL);
 
     if (blist == NULL)
     {
@@ -287,9 +285,6 @@ task_t *task_create(target_t target, const char *name, u32 priority, u32 uid)
     return task;
 }
 
-extern int sys_execve();
-extern int init_user_thread();
-
 // 调用该函数的地方不能有任何局部变量
 // 调用前栈顶需要准备足够的空间
 void task_to_user_mode()
@@ -347,6 +342,7 @@ void task_to_user_mode()
 
 extern void interrupt_exit();
 
+// 构建任务的内核栈
 static void task_build_stack(task_t *task)
 {
     u32 addr = (u32)task + PAGE_SIZE;
@@ -367,9 +363,9 @@ static void task_build_stack(task_t *task)
     task->stack = (u32 *)frame;
 }
 
+// 创建子进程
 pid_t task_fork()
 {
-    // LOGK("fork is called\n");
     task_t *task = running_task();
 
     // 当前进程没有阻塞，且正在执行
@@ -608,5 +604,5 @@ void task_init()
     task_setup();
 
     idle_task = task_create(idle_thread, "idle", 1, KERNEL_USER);
-    task_create(init_thread, "init", 5, NORMAL_USER);
+    task_create(init_thread, "init", 5, NORMAL_USER); // 创建
 }

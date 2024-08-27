@@ -2,8 +2,8 @@
 
 #define LOGK(fmt, args...) DEBUGK(fmt, ##args)
 
-#define KEYBOARD_DATA_PORT 0x60
-#define KEYBOARD_CTRL_PORT 0x64
+#define KEYBOARD_DATA_PORT 0x60 // 数据端口
+#define KEYBOARD_CTRL_PORT 0x64 // 控制端口
 
 #define KEYBOARD_CMD_LED 0xED // 设置 LED 状态
 #define KEYBOARD_CMD_ACK 0xFA // ACK
@@ -109,8 +109,6 @@ typedef enum
     KEY_CLIPBOARD,
     KEY_5D,
     KEY_5E,
-
-    // 以下为自定义按键，为和 keymap 索引匹配
     KEY_PRINT_SCREEN,
 } KEY;
 
@@ -229,179 +227,130 @@ static bool scrlock_state;  // 滚动锁定
 static bool numlock_state;  // 数字锁定
 static bool extcode_state;  // 扩展码状态
 
-// CTRL 键状态
-#define ctrl_state (keymap[KEY_CTRL_L][2] || keymap[KEY_CTRL_L][3])
+// 键盘状态宏
+#define ctrl_state (keymap[KEY_CTRL_L][2] || keymap[KEY_CTRL_L][3]) // 用于检查 CTRL 键状态
+#define alt_state (keymap[KEY_ALT_L][2] || keymap[KEY_ALT_L][3])     // 用于检查 ALT 键状态
+#define shift_state (keymap[KEY_SHIFT_L][2] || keymap[KEY_SHIFT_R][2]) // 用于检查 SHIFT 键状态
 
-// ALT 键状态
-#define alt_state (keymap[KEY_ALT_L][2] || keymap[KEY_ALT_L][3])
 
-// SHIFT 键状态
-#define shift_state (keymap[KEY_SHIFT_L][2] || keymap[KEY_SHIFT_R][2])
-
-static void keyboard_wait()
-{
-    u8 state;
-    do
-    {
-        state = inb(KEYBOARD_CTRL_PORT);
-    } while (state & 0x02); // 读取键盘缓冲区，直到为空
+static void keyboard_wait() {
+    while (inb(KEYBOARD_CTRL_PORT) & 0x02); // 读取键盘缓冲区，直到为空
 }
 
-static void keyboard_ack()
-{
-    u8 state;
-    do
-    {
-        state = inb(KEYBOARD_DATA_PORT);
-    } while (state != KEYBOARD_CMD_ACK);
+static void keyboard_ack() {
+    while (inb(KEYBOARD_DATA_PORT) != KEYBOARD_CMD_ACK); // 等待键盘发送 ACK，表示收到了命令
 }
 
 static void set_leds()
 {
-    u8 leds = (capslock_state << 2) | (numlock_state << 1) | scrlock_state;
-    keyboard_wait();
+    // 滚动锁定：第 0 位
+    // 数字锁定：第 1 位
+    // 大写锁定：第 2 位
+    u8 leds = (capslock_state << 2) | (numlock_state << 1) | scrlock_state; // 根据键盘状态设置 LED 灯
+    keyboard_wait(); // 等待缓冲区为空
     // 设置 LED 命令
     outb(KEYBOARD_DATA_PORT, KEYBOARD_CMD_LED);
-    keyboard_ack();
-
-    keyboard_wait();
-    // 设置 LED 灯状态
-    outb(KEYBOARD_DATA_PORT, leds);
-    keyboard_ack();
+    keyboard_ack(); //等待键盘给 ACK
+    keyboard_wait(); // 等待缓冲区为空
+    outb(KEYBOARD_DATA_PORT, leds); // 设置 LED 灯状态
+    keyboard_ack(); //等待键盘给 ACK
 }
 
 extern int tty_rx_notify();
 
-void keyboard_handler(int vector)
-{
-    assert(vector == 0x21);
-    send_eoi(vector); // 向中断控制器发送中断处理结束的信息
+// 用于判断并相应各种按键操作，包括了部分按键的LED灯
+static void keyboard_handler(int vector) {
+    assert(vector == 0x21); // 确认中断向量正确
+    outb(0x20, 0x20);       // 发送中断结束信号
 
-    // 接收扫描码
-    u16 scancode = inb(KEYBOARD_DATA_PORT);
-    u8 ext = 2; // keymap 状态索引，默认没有 shift 键
+    u8 scancode = inb(KEYBOARD_DATA_PORT);
 
-    // 是扩展码字节
-    if (scancode == 0xe0)
-    {
-        // 置扩展状态
-        extcode_state = true;
+    if (scancode == 0xE0 || scancode == 0xE1) {
+        extcode_state = true; // 处理扩展按键码
         return;
     }
 
-    // 是扩展码
-    if (extcode_state)
-    {
-        // 改状态索引
-        ext = 3;
+    bool break_code = scancode & 0x80; 
+    u16 mapped_code = (extcode_state << 8) | (scancode & 0x7F); 
+    extcode_state = false; 
 
-        // 修改扫描码，添加 0xe0 前缀
-        scancode |= 0xe000;
-
-        // 扩展状态无效
-        extcode_state = false;
+    if (mapped_code == CODE_PRINT_SCREEN_DOWN) {
+        break_code = false; 
     }
 
-    // 获得通码
-    u16 makecode = (scancode & 0x7f);
-    if (makecode == CODE_PRINT_SCREEN_DOWN)
-    {
-        makecode = KEY_PRINT_SCREEN;
-    }
+    KEY key = (KEY)mapped_code; 
 
-    // 通码非法
-    if (makecode > KEY_PRINT_SCREEN)
-    {
+    if (break_code) {
+        // 处理特殊按键释放状态
+        if (key == KEY_CTRL_L || key == KEY_ALT_L || key == KEY_SHIFT_L || key == KEY_SHIFT_R) {
+            keymap[key][2] = keymap[key][3] = false; 
+        }
         return;
     }
 
-    // DEBUGK("scancode 0x%x\n", scancode);
+    // 处理特殊按键按下状态
+    switch (key) {
+        case KEY_CTRL_L:
+        case KEY_ALT_L:
+        case KEY_SHIFT_L:
+        case KEY_SHIFT_R:
+            keymap[key][2] = keymap[key][3] = true; 
+            return;
+        case KEY_CAPSLOCK:
+            capslock_state = !capslock_state; 
+            set_leds(); 
+            return;
+        case KEY_NUMLOCK:
+            numlock_state = !numlock_state; 
+            set_leds(); 
+            return;
+        case KEY_SCRLOCK:
+            scrlock_state = !scrlock_state; 
+            set_leds(); 
+            return;
+        case KEY_PRINT_SCREEN:
+            return;
+        default:
+            break;
+    }
+    
+    // 大写字母和 SHIFT 键处理
+    bool caps = key >= KEY_A && key <= KEY_Z && capslock_state; 
+    bool shift = shift_state != caps;
 
-    // 是否是断码，按键抬起
-    bool breakcode = ((scancode & 0x0080) != 0);
-    if (breakcode)
-    {
-        // 如果是则设置状态
-        keymap[makecode][ext] = false;
-        return;
+    char ch = keymap[key][shift]; 
+    if (ch == INV) return;
+
+    if (fifo_full(&fifo)) return; 
+
+    fifo_put(&fifo, ch); 
+
+    if (waiter) { 
+        task_unblock(waiter, EOK); 
+        waiter = NULL; 
     }
 
-    // 下面是通码，按键按下
-    keymap[makecode][ext] = true;
-
-    // 是否需要设置 LED 灯
-    bool led = false;
-    if (makecode == KEY_NUMLOCK)
-    {
-        numlock_state = !numlock_state;
-        led = true;
-    }
-    else if (makecode == KEY_CAPSLOCK)
-    {
-        capslock_state = !capslock_state;
-        led = true;
-    }
-    else if (makecode == KEY_SCRLOCK)
-    {
-        scrlock_state = !scrlock_state;
-        led = true;
-    }
-
-    if (led)
-    {
-        set_leds();
-    }
-
-    // 计算 shift 状态
-    bool shift = false;
-    if (capslock_state && ('a' <= keymap[makecode][0] && keymap[makecode][0] <= 'z'))
-    {
-        shift = !shift;
-    }
-    if (shift_state)
-    {
-        shift = !shift;
-    }
-
-    // 获得按键 ASCII 码
-    char ch = 0;
-    // [/?] 这个键比较特殊，只有这个键扩展码和普通码一样
-    if (ext == 3 && (makecode != KEY_SLASH))
-    {
-        ch = keymap[makecode][1];
-    }
-    else
-    {
-        ch = keymap[makecode][shift];
-    }
-
-    if (ch == INV)
-        return;
-
-    // LOGK("keydown %c \n", ch);
-
-    // 通知 tty 设备处理输入字符
-    if (tty_rx_notify(&ch, ctrl_state, shift_state, alt_state) > 0)
-        return;
-
-    fifo_put(&fifo, ch);
-    if (waiter != NULL)
-    {
-        task_unblock(waiter, EOK);
-        waiter = NULL;
-    }
+    tty_rx_notify(); 
 }
 
-u32 keyboard_read(void *dev, char *buf, u32 count)
-{
+u32 keyboard_read(void *dev, char *buf, u32 count) {
+    if (!buf || count == 0) return 0; // 添加参数有效性检查
+
     lock_acquire(&lock);
     int nr = 0;
-    while (nr < count)
-    {
-        while (fifo_empty(&fifo))
-        {
+    int timeout = 5000; // 超时时间，假设单位是毫秒
+
+    while (nr < count) {
+        int start = get_current_time(); // 获取当前时间
+        while (fifo_empty(&fifo)) {
             waiter = running_task();
             task_block(waiter, NULL, TASK_BLOCKED, TIMELESS);
+
+            // 检查超时
+            if (get_current_time() - start > timeout) {
+                lock_release(&lock);
+                return nr; // 返回已读取的字符数
+            }
         }
         buf[nr++] = fifo_get(&fifo);
     }
@@ -411,22 +360,34 @@ u32 keyboard_read(void *dev, char *buf, u32 count)
 
 void keyboard_init()
 {
-    numlock_state = false;
-    scrlock_state = false;
+    // 初始化 FIFO 缓冲区
+    fifo_init(&fifo, buf, BUFFER_SIZE);
+
+    // 初始化键盘状态
     capslock_state = false;
+    scrlock_state = false;
+    numlock_state = false;
     extcode_state = false;
 
-    fifo_init(&fifo, buf, BUFFER_SIZE);
+    // 设置 LED 状态
+    set_leds(); 
+
+    // 初始化锁
     lock_init(&lock);
+
+    // 初始化等待任务指针
     waiter = NULL;
 
-    set_leds();
-
+    // 设置中断处理程序
     set_interrupt_handler(IRQ_KEYBOARD, keyboard_handler);
+
+    // 启用键盘中断
     set_interrupt_mask(IRQ_KEYBOARD, true);
 
+    // 安装设备
     device_install(
         DEV_CHAR, DEV_KEYBOARD,
         NULL, "keyboard", 0,
-        NULL, keyboard_read, NULL);
+        NULL, keyboard_read, NULL
+    );
 }
