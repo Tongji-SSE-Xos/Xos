@@ -1,90 +1,89 @@
 #include "hyc.h"
 
-// 进入用户态，准备内核栈
-// 保证栈顶占用足够的大小
-// 约等于 char temp[100];
-static void prepare_stack()
+// 进入用户模式并准备内核栈
+// 确保栈顶具有足够的空间，类似于 char temp[100];
+static void configure_stack()
 {
-    // 获取返回地址，也就是下面调用 task_to_user_mode 的位置
-    void *addr = __builtin_return_address(0);
+    // 获取返回地址，即调用 user_mode_transition 的位置
+    void *ret_addr = __builtin_return_address(0);
     asm volatile(
-        "subl $100, %%esp\n" // 为栈顶有足够的空间
-        "pushl %%eax\n"      // 将返回地址压入栈中
-        "ret \n"             // 直接返回
-        ::"a"(addr));
+        "subl $100, %%esp\n" // 为栈顶留出足够的空间
+        "pushl %%eax\n"      // 将返回地址压入栈
+        "ret \n"             // 返回到调用点
+        ::"a"(ret_addr));
 }
 
-extern int main();
+extern int user_main();
 
-int init_user_thread()
+int initiate_user_thread()
 {
     while (true)
     {
-        u32 status;
-        pid_t pid = fork();
-        if (pid)
+        u32 exit_status;
+        pid_t process_id = fork();
+        if (process_id)
         {
-            pid_t child = waitpid(pid, &status);
-            printf("wait pid %d status %d %d\n", child, status, time());
+            pid_t finished_pid = waitpid(process_id, &exit_status);
+            printf("wait pid %d status %d %d\n", finished_pid, exit_status, time());
         }
         else
         {
-            main();
+            user_main();
         }
     }
     return 0;
 }
 
-extern void serial_init();
-extern void keyboard_init();
-extern void time_init();
-extern void tty_init();
-extern void rtc_init();
+extern void init_serial();
+extern void init_keyboard();
+extern void init_time();
+extern void init_tty();
+extern void init_rtc();
 
-extern void ide_init();
-extern void floppy_init();
-extern void ramdisk_init();
-extern void sb16_init();
-extern void e1000_init();
+extern void init_ide();
+extern void init_floppy();
+extern void init_ramdisk();
+extern void init_sb16();
+extern void init_e1000();
 
-extern void buffer_init();
-extern void file_init();
-extern void inode_init();
-extern void pipe_init();
-extern void minix_init();
-extern void iso_init();
-extern void super_init();
-extern void dev_init();
-extern void net_init();
-extern void resolv_init();
+extern void init_buffer();
+extern void init_file();
+extern void init_inode();
+extern void init_pipe();
+extern void init_minix();
+extern void init_iso();
+extern void init_super();
+extern void init_dev();
+extern void init_network();
+extern void init_resolv();
 
-void init_thread()
+void configure_thread()
 {
-    serial_init();   // 初始化串口
-    keyboard_init(); // 初始化键盘
-    time_init();     // 初始化时间
-    tty_init();      // 初始化 TTY 设备，必须在键盘之后
-    // rtc_init();   // 初始化实时时钟，目前没用
+    init_serial();   // 配置串口
+    init_keyboard(); // 配置键盘
+    init_time();     // 配置时间
+    init_tty();      // 配置 TTY 设备，必须在键盘后初始化
+    // init_rtc();   // 配置实时时钟，暂时不使用
 
-    ramdisk_init(); // 初始化内存虚拟磁盘
+    init_ramdisk(); // 配置内存虚拟磁盘
 
-    ide_init();    // 初始化 IDE 设备
-    sb16_init();   // 初始化声霸卡
-    floppy_init(); // 初始化软盘
-    e1000_init();  // 初始化 e1000 网卡
+    init_ide();    // 配置 IDE 设备
+    init_sb16();   // 配置声卡
+    init_floppy(); // 配置软盘驱动器
+    init_e1000();  // 配置 e1000 网卡
 
-    buffer_init(); // 初始化高速缓冲
-    file_init();   // 初始化文件
-    inode_init();  // 初始化 inode
-    minix_init();  // 初始化 minix 文件系统
-    iso_init();    // 初始化 iso9660 文件系统
-    pipe_init();   // 初始化管道
-    super_init();  // 初始化超级块
+    init_buffer(); // 配置高速缓冲
+    init_file();   // 配置文件系统
+    init_inode();  // 配置 inode
+    init_minix();  // 配置 minix 文件系统
+    init_iso();    // 配置 iso9660 文件系统
+    init_pipe();   // 配置管道
+    init_super();  // 配置超级块
 
-    dev_init();    // 初始化设备文件
-    net_init();    // 配置网卡
-    resolv_init(); // 初始化域名解析
+    init_dev();    // 配置设备文件
+    init_network();    // 配置网络
+    init_resolv(); // 配置域名解析
 
-    prepare_stack();     // 准备栈顶
-    task_to_user_mode(); // 进入用户态
+    configure_stack();     // 配置栈顶
+    task_to_user_mode(); // 切换到用户模式
 }

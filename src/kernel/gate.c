@@ -8,13 +8,13 @@ void syscall_check(u32 nr)
 {
     if (nr >= SYSCALL_SIZE)
     {
-        panic("syscall nr error!!!");
+        panic("Invalid syscall number!!!");
     }
 }
 
 static void sys_default()
 {
-    panic("syscall not implemented!!!");
+    panic("Unimplemented syscall!!!");
 }
 
 extern int sys_test();

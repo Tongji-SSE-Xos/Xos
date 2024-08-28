@@ -1,43 +1,46 @@
 #include "hyc.h"
 
-static u32 __attribute__((section(".onix.addr"))) kernel_addr = 0x20000;
-static u32 __attribute__((section(".onix.size"))) kernel_size = 0;
-static u32 __attribute__((section(".onix.chksum"))) kernel_chksum = 0;
-static u32 __attribute__((section(".onix.magic"))) kernel_magic = ONIX_MAGIC;
+// 将内核元数据保存在指定段
+static u32 __attribute__((section(".onix.addr"))) kernel_base_addr = 0x20000;
+static u32 __attribute__((section(".onix.size"))) kernel_total_size = 0;
+static u32 __attribute__((section(".onix.chksum"))) kernel_checksum = 0;
+static u32 __attribute__((section(".onix.magic"))) kernel_identifier = ONIX_MAGIC;
 
-static u8 magic_msg[] = "kernel magic check failure!!!";
-static u8 crc32_msg[] = "kernel crc32 check failure!!!";
-static char *video = (char *)0xb8000;
+static u8 magic_fail_msg[] = "Kernel magic validation failed!";
+static u8 crc_fail_msg[] = "Kernel CRC32 validation failed!";
+static char *video_memory = (char *)0xb8000;
 
-extern void hang();
+extern void halt_system();
 
-static void show_message(char *msg, int len)
+static void display_message(char *msg, int length)
 {
-    for (int i = 0; i < len; i++)
-        video[i * 2] = msg[i];
+    for (int i = 0; i < length; i++) {
+        video_memory[i * 2] = msg[i];
+    }
 }
 
-err_t onix_init()
+err_t onix_initialize()
 {
-    if (kernel_magic != ONIX_MAGIC)
-    {
-        show_message(magic_msg, sizeof(magic_msg));
-        goto failure;
+    if (kernel_identifier != ONIX_MAGIC) {
+        display_message(magic_fail_msg, sizeof(magic_fail_msg));
+        goto error;
     }
 
-    u32 size = kernel_size;
-    u32 chksum = kernel_chksum;
+    u32 ksize = kernel_total_size;
+    u32 kchecksum = kernel_checksum;
 
-    kernel_chksum = 0;
-    kernel_size = 0;
+    kernel_checksum = 0;
+    kernel_total_size = 0;
 
-    u32 result = eth_fcs((void *)kernel_addr, size);
-    if (result != chksum)
-    {
-        show_message(crc32_msg, sizeof(crc32_msg));
-        goto failure;
+    u32 calc_checksum = eth_fcs((void *)kernel_base_addr, ksize);
+    if (calc_checksum != kchecksum) {
+        display_message(crc_fail_msg, sizeof(crc_fail_msg));
+        goto error;
     }
+
     return EOK;
-failure:
-    hang();
+
+error:
+    halt_system();
 }
+
