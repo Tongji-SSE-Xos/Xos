@@ -2,18 +2,20 @@
 
 extern int sys_kill();
 
-static void task_alarm(timer_t *timer)
+static void handle_task_alarm(timer_t *timer)
 {
-    timer->task->alarm = NULL;
-    sys_kill(timer->task->pid, SIGALRM);
+    task_t *task = timer->task;
+    task->alarm = NULL;
+    sys_kill(task->pid, SIGALRM);
 }
 
-int sys_alarm(int sec)
+int sys_alarm(int seconds)
 {
-    task_t *task = running_task();
-    if (task->alarm)
+    task_t *current_task = running_task();
+    if (current_task->alarm != NULL)
     {
-        timer_put(task->alarm);
+        timer_put(current_task->alarm);
     }
-    task->alarm = timer_add(sec * 1000, task_alarm, 0);
+    current_task->alarm = timer_add(seconds * 1000, handle_task_alarm, 0);
+    return 0;  // 如果需要返回值，可以返回一个值
 }

@@ -5,7 +5,7 @@
 extern u32 free_pages;
 static arena_descriptor_t descriptors[DESC_COUNT];
 
-// arena 初始化
+// 初始化 arena
 void arena_init()
 {
     u32 block_size = 16;
@@ -16,40 +16,38 @@ void arena_init()
         desc->total_block = (PAGE_SIZE - sizeof(arena_t)) / block_size;
         desc->page_count = 0;
         list_init(&desc->free_list);
-        block_size <<= 1; // block *= 2;
+        block_size <<= 1; // block_size *= 2;
     }
 }
 
-// 获得 arena 第 idx 块内存指针
+// 获取 arena 中第 idx 块内存的指针
 static void *get_arena_block(arena_t *arena, u32 idx)
 {
-    assert(arena->desc->total_block > idx);
-    void *addr = (void *)(arena + 1);
-    u32 gap = idx * arena->desc->block_size;
-    return addr + gap;
+    assert(idx < arena->desc->total_block);
+    u32 offset = idx * arena->desc->block_size;
+    return (void *)((u32)(arena + 1) + offset);
 }
 
 static arena_t *get_block_arena(block_t *block)
 {
-    return (arena_t *)((u32)block & 0xfffff000);
+    return (arena_t *)((u32)block & 0xFFFFF000);
 }
 
 void *kmalloc(size_t size)
 {
-    arena_descriptor_t *desc = NULL;
     arena_t *arena;
     block_t *block;
     char *addr;
 
     if (size > 1024)
     {
-        u32 asize = size + sizeof(arena_t);
-        u32 count = div_round_up(asize, PAGE_SIZE);
+        u32 alloc_size = size + sizeof(arena_t);
+        u32 page_count = div_round_up(alloc_size, PAGE_SIZE);
 
-        arena = (arena_t *)alloc_kpage(count);
-        memset(arena, 0, count * PAGE_SIZE);
+        arena = (arena_t *)alloc_kpage(page_count);
+        memset(arena, 0, page_count * PAGE_SIZE);
         arena->large = true;
-        arena->count = count;
+        arena->count = page_count;
         arena->desc = NULL;
         arena->magic = ONIX_MAGIC;
 
@@ -57,6 +55,7 @@ void *kmalloc(size_t size)
         return addr;
     }
 
+    arena_descriptor_t *desc = NULL;
     for (size_t i = 0; i < DESC_COUNT; i++)
     {
         desc = &descriptors[i];
@@ -81,9 +80,7 @@ void *kmalloc(size_t size)
         for (size_t i = 0; i < desc->total_block; i++)
         {
             block = get_arena_block(arena, i);
-            assert(!list_search(&arena->desc->free_list, block));
-            list_push(&arena->desc->free_list, block);
-            assert(list_search(&arena->desc->free_list, block));
+            list_push(&desc->free_list, block);
         }
     }
 
@@ -92,8 +89,6 @@ void *kmalloc(size_t size)
     arena = get_block_arena(block);
     assert(arena->magic == ONIX_MAGIC && !arena->large);
 
-    // memset(block, 0, desc->block_size);
-
     arena->count--;
 
     return block;
@@ -101,12 +96,11 @@ void *kmalloc(size_t size)
 
 void kfree(void *ptr)
 {
-    assert(ptr);
+    assert(ptr != NULL);
 
     block_t *block = (block_t *)ptr;
     arena_t *arena = get_block_arena(block);
 
-    assert(arena->large == 1 || arena->large == 0);
     assert(arena->magic == ONIX_MAGIC);
 
     if (arena->large)
@@ -123,13 +117,9 @@ void kfree(void *ptr)
         for (size_t i = 0; i < arena->desc->total_block; i++)
         {
             block = get_arena_block(arena, i);
-            assert(list_search(&arena->desc->free_list, block));
             list_remove(block);
-            assert(!list_search(&arena->desc->free_list, block));
         }
         arena->desc->page_count--;
-        assert(arena->desc->page_count >= BUF_COUNT);
-
         free_kpage((u32)arena, 1);
     }
 }

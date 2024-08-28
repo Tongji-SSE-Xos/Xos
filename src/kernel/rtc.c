@@ -47,42 +47,42 @@ void rtc_handler(int vector)
 }
 
 // 设置 secs 秒后发生实时时钟中断
-void set_alarm(u32 secs)
+void set_alarm(u32 seconds)
 {
-    LOGK("beeping after %d seconds\n", secs);
+    LOGK("beeping after %d seconds\n", seconds);
 
-    tm time;
-    time_read(&time);
+    tm current_time;
+    time_read(&current_time);
 
-    u8 sec = secs % 60;
-    secs /= 60;
-    u8 min = secs % 60;
-    secs /= 60;
-    u32 hour = secs;
+    u8 add_seconds = seconds % 60;
+    seconds /= 60;
+    u8 add_minutes = seconds % 60;
+    seconds /= 60;
+    u32 add_hours = seconds;
 
-    time.tm_sec += sec;
-    if (time.tm_sec >= 60)
+    current_time.tm_sec += add_seconds;
+    if (current_time.tm_sec >= 60)
     {
-        time.tm_sec %= 60;
-        time.tm_min += 1;
+        current_time.tm_sec %= 60;
+        current_time.tm_min += 1;
     }
 
-    time.tm_min += min;
-    if (time.tm_min >= 60)
+    current_time.tm_min += add_minutes;
+    if (current_time.tm_min >= 60)
     {
-        time.tm_min %= 60;
-        time.tm_hour += 1;
+        current_time.tm_min %= 60;
+        current_time.tm_hour += 1;
     }
 
-    time.tm_hour += hour;
-    if (time.tm_hour >= 24)
+    current_time.tm_hour += add_hours;
+    if (current_time.tm_hour >= 24)
     {
-        time.tm_hour %= 24;
+        current_time.tm_hour %= 24;
     }
 
-    cmos_write(CMOS_HOUR, bin_to_bcd(time.tm_hour));
-    cmos_write(CMOS_MINUTE, bin_to_bcd(time.tm_min));
-    cmos_write(CMOS_SECOND, bin_to_bcd(time.tm_sec));
+    cmos_write(CMOS_HOUR, bin_to_bcd(current_time.tm_hour));
+    cmos_write(CMOS_MINUTE, bin_to_bcd(current_time.tm_min));
+    cmos_write(CMOS_SECOND, bin_to_bcd(current_time.tm_sec));
 
     cmos_write(CMOS_B, 0b00100010); // 打开闹钟中断
     cmos_read(CMOS_C);              // 读 C 寄存器，以允许 CMOS 中断
@@ -90,10 +90,7 @@ void set_alarm(u32 secs)
 
 void rtc_init()
 {
-    // cmos_write(CMOS_B, 0b01000010); // 打开周期中断
 
-    // 设置中断频率
-    // outb(CMOS_A, (inb(CMOS_A) & 0xf) | 0b1110);
 
     set_interrupt_handler(IRQ_RTC, rtc_handler);
     set_interrupt_mask(IRQ_RTC, true);

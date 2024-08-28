@@ -4,67 +4,66 @@
 
 #define LOGK(fmt, args...) DEBUGK(fmt, ##args)
 
-#define RAMDISK_NR 4
+#define MAX_RAMDISKS 4
 
-typedef struct ramdisk_t
+typedef struct {
+    u8 *base_address; // 内存基地址
+    u32 total_size;   // 总内存大小
+} RamDisk;
+
+static ramdisk_t ramdisks[MAX_RAMDISKS];
+
+int handle_ramdisk_ioctl(RamDisk *disk, int command, void *args, int flags)
 {
-    u8 *start; // 内存开始位置
-    u32 size;  // 占用内存大小
-} ramdisk_t;
-
-static ramdisk_t ramdisks[RAMDISK_NR];
-
-int ramdisk_ioctl(ramdisk_t *disk, int cmd, void *args, int flags)
-{
-    switch (cmd)
+    switch (command)
     {
     case DEV_CMD_SECTOR_START:
         return 0;
     case DEV_CMD_SECTOR_COUNT:
-        return disk->size / SECTOR_SIZE;
+        return disk->total_size / SECTOR_SIZE;
     case DEV_CMD_SECTOR_SIZE:
         return SECTOR_SIZE;
     default:
-        panic("device command %d can't recognize!!!", cmd);
-        break;
+        panic("Unrecognized device command: %d", command);
     }
 }
 
-int ramdisk_read(ramdisk_t *disk, void *buf, u8 count, idx_t lba)
+int ramdisk_read(RamDisk *disk, void *buffer, u8 sector_count, idx_t lba)
 {
-    void *addr = disk->start + lba * SECTOR_SIZE;
-    u32 len = count * SECTOR_SIZE;
-    assert(((u32)addr + len) < (KERNEL_RAMDISK_MEM + KERNEL_MEMORY_SIZE));
-    memcpy(buf, addr, len);
+    void *address = disk->base_address + lba * SECTOR_SIZE;
+    u32 length = sector_count * SECTOR_SIZE;
+    assert(((u32)address + length) < (KERNEL_RAMDISK_MEM + KERNEL_MEMORY_SIZE));
+    memcpy(buffer, address, length);
     return EOK;
 }
 
-int ramdisk_write(ramdisk_t *disk, void *buf, u8 count, idx_t lba)
+int ramdisk_write(RamDisk *disk, void *buffer, u8 sector_count, idx_t lba)
 {
-    void *addr = disk->start + lba * SECTOR_SIZE;
-    u32 len = count * SECTOR_SIZE;
-    assert(((u32)addr + len) < (KERNEL_RAMDISK_MEM + KERNEL_MEMORY_SIZE));
-    memcpy(addr, buf, len);
+    void *address = disk->base_address + lba * SECTOR_SIZE;
+    u32 length = sector_count * SECTOR_SIZE;
+    assert(((u32)address + length) < (KERNEL_RAMDISK_MEM + KERNEL_MEMORY_SIZE));
+    memcpy(address, buffer, length);
     return EOK;
 }
 
 void ramdisk_init()
 {
-    LOGK("ramdisk init...\n");
+    LOGK("Initializing ramdisks...\n");
 
-    u32 size = KERNEL_RAMDISK_SIZE / RAMDISK_NR;
-    assert(size % SECTOR_SIZE == 0);
+    u32 partition_size = KERNEL_RAMDISK_SIZE / MAX_RAMDISKS;
+    assert(partition_size % SECTOR_SIZE == 0);
 
-    char name[32];
+    char device_name[32];
 
-    for (size_t i = 0; i < RAMDISK_NR; i++)
+    for (size_t i = 0; i < MAX_RAMDISKS; i++)
     {
-        ramdisk_t *ramdisk = &ramdisks[i];
-        ramdisk->start = (u8 *)(KERNEL_RAMDISK_MEM + size * i);
-        ramdisk->size = size;
-        memset(ramdisk->start, 0, ramdisk->size);
-        sprintf(name, "md%c", i + 'a');
-        device_install(DEV_BLOCK, DEV_RAMDISK, ramdisk, name, 0,
-                       ramdisk_ioctl, ramdisk_read, ramdisk_write);
+        RamDisk *ramdisk = &ramdisks[i];
+        ramdisk->base_address = (u8 *)(KERNEL_RAMDISK_MEM + partition_size * i);
+        ramdisk->total_size = partition_size;
+        memset(ramdisk->base_address, 0, ramdisk->total_size);
+
+        snprintf(device_name, sizeof(device_name), "md%c", i + 'a');
+        device_install(DEV_BLOCK, DEV_RAMDISK, ramdisk, device_name, 0,
+                       handle_ramdisk_ioctl, ramdisk_read, ramdisk_write);
     }
 }
