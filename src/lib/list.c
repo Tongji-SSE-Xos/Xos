@@ -1,85 +1,85 @@
 #include "hyc.h"
 
 // 初始化链表
-void list_init(list_t *list)
+void init_list(list_t *lst)
 {
-    list->head.prev = NULL;
-    list->tail.next = NULL;
-    list->head.next = &list->tail;
-    list->tail.prev = &list->head;
+    lst->head.prev = NULL;
+    lst->tail.next = NULL;
+    lst->head.next = &lst->tail;
+    lst->tail.prev = &lst->head;
 }
 
-// 在 anchor 结点前插入结点 node
-void list_insert_before(list_node_t *anchor, list_node_t *node)
+// 在 reference 结点前插入新结点 node
+void insert_node_before(list_node_t *reference, list_node_t *node)
 {
-    node->prev = anchor->prev;
-    node->next = anchor;
+    node->prev = reference->prev;
+    node->next = reference;
 
-    anchor->prev->next = node;
-    anchor->prev = node;
+    reference->prev->next = node;
+    reference->prev = node;
 }
 
-// 在 anchor 结点后插入结点 node
-void list_insert_after(list_node_t *anchor, list_node_t *node)
+// 在 reference 结点后插入新结点 node
+void insert_node_after(list_node_t *reference, list_node_t *node)
 {
-    node->prev = anchor;
-    node->next = anchor->next;
+    node->prev = reference;
+    node->next = reference->next;
 
-    anchor->next->prev = node;
-    anchor->next = node;
+    reference->next->prev = node;
+    reference->next = node;
 }
 
-// 插入到头结点后
-void list_push(list_t *list, list_node_t *node)
+// 插入到链表头部
+void list_push_front(list_t *lst, list_node_t *node)
 {
-    assert(!list_search(list, node));
-    list_insert_after(&list->head, node);
+    assert(!is_node_in_list(lst, node));
+    insert_node_after(&lst->head, node);
 }
 
-// 移除头结点后的结点
-list_node_t *list_pop(list_t *list)
+// 移除链表头部后的第一个结点
+list_node_t *list_pop_front(list_t *lst)
 {
-    assert(!list_empty(list));
+    assert(!is_list_empty(lst));
 
-    list_node_t *node = list->head.next;
-    list_remove(node);
+    list_node_t *node = lst->head.next;
+    remove_node(node);
 
     return node;
 }
 
-// 插入到尾结点前
-void list_pushback(list_t *list, list_node_t *node)
+// 插入到链表尾部前
+void list_push_back(list_t *lst, list_node_t *node)
 {
-    assert(!list_search(list, node));
-    list_insert_before(&list->tail, node);
+    assert(!is_node_in_list(lst, node));
+    insert_node_before(&lst->tail, node);
 }
 
-// 移除尾结点前的结点
-list_node_t *list_popback(list_t *list)
+// 移除链表尾部前的结点
+list_node_t *list_pop_back(list_t *lst)
 {
-    assert(!list_empty(list));
+    assert(!is_list_empty(lst));
 
-    list_node_t *node = list->tail.prev;
-    list_remove(node);
+    list_node_t *node = lst->tail.prev;
+    remove_node(node);
 
     return node;
 }
 
-// 查找链表中结点是否存在
-bool list_search(list_t *list, list_node_t *node)
+// 查找链表中是否存在指定结点
+bool is_node_in_list(list_t *lst, list_node_t *node)
 {
-    list_node_t *next = list->head.next;
-    while (next != &list->tail)
+    list_node_t *current = lst->head.next;
+    while (current != &lst->tail)
     {
-        if (next == node)
+        if (current == node)
             return true;
-        next = next->next;
+        current = current->next;
     }
     return false;
 }
 
-// 从链表中删除结点
-void list_remove(list_node_t *node)
+// 从链表中删除指定结点
+void remove_node(list_node_t *node)
 {
     assert(node->prev != NULL);
     assert(node->next != NULL);
@@ -91,36 +91,36 @@ void list_remove(list_node_t *node)
 }
 
 // 判断链表是否为空
-bool list_empty(list_t *list)
+bool is_list_empty(list_t *lst)
 {
-    return (list->head.next == &list->tail);
+    return (lst->head.next == &lst->tail);
 }
 
-// 获得链表长度
-u32 list_size(list_t *list)
+// 获取链表的长度
+u32 get_list_size(list_t *lst)
 {
-    list_node_t *next = list->head.next;
+    list_node_t *current = lst->head.next;
     u32 size = 0;
-    while (next != &list->tail)
+    while (current != &lst->tail)
     {
         size++;
-        next = next->next;
+        current = current->next;
     }
     return size;
 }
 
 // 链表插入排序
-void list_insert_sort(list_t *list, list_node_t *node, int offset)
+void list_sorted_insert(list_t *lst, list_node_t *node, int offset)
 {
-    // 从链表找到第一个比当前节点 key 点更大的节点，进行插入到前面
-    list_node_t *anchor = &list->tail;
-    int key = element_node_key(node, offset);
-    for (list_node_t *ptr = list->head.next; ptr != &list->tail; ptr = ptr->next)
+    // 找到第一个比节点 key 大的节点，在其前插入新节点
+    list_node_t *reference = &lst->tail;
+    int node_key = element_node_key(node, offset);
+    for (list_node_t *current = lst->head.next; current != &lst->tail; current = current->next)
     {
-        int compare = element_node_key(ptr, offset);
-        if (compare > key)
+        int current_key = element_node_key(current, offset);
+        if (current_key > node_key)
         {
-            anchor = ptr;
+            reference = current;
             break;
         }
     }
@@ -128,6 +128,6 @@ void list_insert_sort(list_t *list, list_node_t *node, int offset)
     assert(node->next == NULL);
     assert(node->prev == NULL);
 
-    // 插入链表
-    list_insert_before(anchor, node);
+    // 插入到找到的参考节点前
+    insert_node_before(reference, node);
 }

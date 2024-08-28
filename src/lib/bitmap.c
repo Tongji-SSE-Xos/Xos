@@ -1,114 +1,110 @@
 #include "hyc.h"
 
 // 构造位图
-void bitmap_make(bitmap_t *map, char *bits, u32 length, u32 offset)
+void bitmap_create(bitmap_t *bmp, char *data, u32 len, u32 ofs)
 {
-    map->bits = bits;
-    map->length = length;
-    map->offset = offset;
+    bmp->bits = data;
+    bmp->length = len;
+    bmp->offset = ofs;
 }
 
-// 位图初始化，全部置为 0
-void bitmap_init(bitmap_t *map, char *bits, u32 length, u32 start)
+// 初始化位图，将所有位重置为 0
+void bitmap_initialize(bitmap_t *bmp, char *data, u32 len, u32 start)
 {
-    memset(bits, 0, length);
-    bitmap_make(map, bits, length, start);
+    memset(data, 0, len);
+    bitmap_create(bmp, data, len, start);
 }
 
-// 测试某一位是否为 1
-bool bitmap_test(bitmap_t *map, idx_t index)
+// 检查位图中某一位是否为 1
+bool bitmap_is_set(bitmap_t *bmp, idx_t pos)
 {
-    assert(index >= map->offset);
+    assert(pos >= bmp->offset);
 
-    // 得到位图的索引
-    idx_t idx = index - map->offset;
+    // 计算位图的具体索引
+    idx_t idx = pos - bmp->offset;
 
-    // 位图数组中的字节
-    u32 bytes = idx / 8;
+    // 获取对应的字节和位
+    u32 byte_idx = idx / 8;
+    u8 bit_idx = idx % 8;
 
-    // 该字节中的那一位
-    u8 bits = idx % 8;
+    assert(byte_idx < bmp->length);
 
-    assert(bytes < map->length);
-
-    // 返回那一位是否等于 1
-    return (map->bits[bytes] & (1 << bits));
+    // 返回该位是否为 1
+    return (bmp->bits[byte_idx] & (1 << bit_idx)) != 0;
 }
 
-// 设置位图某位的值
-void bitmap_set(bitmap_t *map, idx_t index, bool value)
+// 设置位图中某一位的值
+void bitmap_set_bit(bitmap_t *bmp, idx_t pos, bool val)
 {
-    // value 必须是二值的
-    assert(value == 0 || value == 1);
+    // val 必须是 0 或 1
+    assert(val == 0 || val == 1);
+    assert(pos >= bmp->offset);
 
-    assert(index >= map->offset);
+    // 计算位图的索引
+    idx_t idx = pos - bmp->offset;
 
-    // 得到位图的索引
-    idx_t idx = index - map->offset;
+    // 计算对应的字节和位
+    u32 byte_idx = idx / 8;
+    u8 bit_idx = idx % 8;
 
-    // 位图数组中的字节
-    u32 bytes = idx / 8;
-
-    // 该字节中的那一位
-    u8 bits = idx % 8;
-    if (value)
+    if (val)
     {
-        // 置为 1
-        map->bits[bytes] |= (1 << bits);
+        // 将对应的位设置为 1
+        bmp->bits[byte_idx] |= (1 << bit_idx);
     }
     else
     {
-        // 置为 0
-        map->bits[bytes] &= ~(1 << bits);
+        // 将对应的位设置为 0
+        bmp->bits[byte_idx] &= ~(1 << bit_idx);
     }
 }
 
-// 从位图中得到连续的 count 位
-int bitmap_scan(bitmap_t *map, u32 count)
+// 从位图中寻找连续的 count 位可用位
+int bitmap_find(bitmap_t *bmp, u32 count)
 {
-    int start = EOF;                 // 标记目标开始的位置
-    u32 bits_left = map->length * 8; // 剩余的位数
-    u32 next_bit = 0;                // 下一个位
-    u32 counter = 0;                 // 计数器
+    int start_pos = -1;            // 用于标记找到的开始位置
+    u32 remaining_bits = bmp->length * 8; // 位图中的剩余位数
+    u32 current_bit = 0;           // 当前位索引
+    u32 match_count = 0;           // 连续匹配计数
 
-    // 从头开始找
-    while (bits_left-- > 0)
+    // 从头开始查找
+    while (remaining_bits-- > 0)
     {
-        if (!bitmap_test(map, map->offset + next_bit))
+        if (!bitmap_is_set(bmp, bmp->offset + current_bit))
         {
-            // 如果下一个位没有占用，则计数器加一
-            counter++;
+            // 当前位未占用，计数加一
+            match_count++;
         }
         else
         {
-            // 否则计数器置为 0，继续寻找
-            counter = 0;
+            // 当前位已占用，计数重置
+            match_count = 0;
         }
 
-        // 下一位，位置加一
-        next_bit++;
+        // 移动到下一位
+        current_bit++;
 
-        // 找到数量一致，则设置开始的位置，结束
-        if (counter == count)
+        // 如果找到了连续 count 个空位
+        if (match_count == count)
         {
-            start = next_bit - count;
+            start_pos = current_bit - count;
             break;
         }
     }
 
-    // 如果没找到，则返回 EOF(END OF FILE)
-    if (start == EOF)
-        return EOF;
+    // 如果未找到连续空位，返回 -1
+    if (start_pos == -1)
+        return -1;
 
-    // 否则将找到的位，全部置为 1
-    bits_left = count;
-    next_bit = start;
-    while (bits_left--)
+    // 否则将找到的位设置为 1
+    remaining_bits = count;
+    current_bit = start_pos;
+    while (remaining_bits--)
     {
-        bitmap_set(map, map->offset + next_bit, true);
-        next_bit++;
+        bitmap_set_bit(bmp, bmp->offset + current_bit, true);
+        current_bit++;
     }
 
-    // 然后返回索引
-    return start + map->offset;
+    // 返回找到的开始位置的索引
+    return start_pos + bmp->offset;
 }

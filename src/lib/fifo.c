@@ -1,43 +1,52 @@
 #include "hyc.h"
 
-static _inline u32 fifo_next(fifo_t *fifo, u32 pos)
+// 计算FIFO下一个位置
+static _inline u32 fifo_next_pos(fifo_t *queue, u32 pos)
 {
-    return (pos + 1) % fifo->length;
+    return (pos + 1) % queue->length;
 }
 
-void fifo_init(fifo_t *fifo, char *buf, u32 length)
+// 初始化FIFO缓冲区
+void fifo_initialize(fifo_t *queue, char *buffer, u32 size)
 {
-    fifo->buf = buf;
-    fifo->length = length;
-    fifo->head = 0;
-    fifo->tail = 0;
+    queue->buf = buffer;
+    queue->length = size;
+    queue->head = 0;
+    queue->tail = 0;
 }
 
-bool fifo_full(fifo_t *fifo)
+// 判断FIFO是否已满
+bool fifo_is_full(fifo_t *queue)
 {
-    bool full = (fifo_next(fifo, fifo->head) == fifo->tail);
-    return full;
+    // 当下一个位置是尾部时，FIFO已满
+    return (fifo_next_pos(queue, queue->head) == queue->tail);
 }
 
-bool fifo_empty(fifo_t *fifo)
+// 判断FIFO是否为空
+bool fifo_is_empty(fifo_t *queue)
 {
-    return (fifo->head == fifo->tail);
+    // 当头部和尾部相等时，FIFO为空
+    return (queue->head == queue->tail);
 }
 
-char fifo_get(fifo_t *fifo)
+// 从FIFO中获取一个字节
+char fifo_read(fifo_t *queue)
 {
-    assert(!fifo_empty(fifo));
-    char byte = fifo->buf[fifo->tail];
-    fifo->tail = fifo_next(fifo, fifo->tail);
-    return byte;
+    // 获取之前必须确保FIFO非空
+    assert(!fifo_is_empty(queue));
+    char data = queue->buf[queue->tail];
+    queue->tail = fifo_next_pos(queue, queue->tail);
+    return data;
 }
 
-void fifo_put(fifo_t *fifo, char byte)
+// 将一个字节写入FIFO
+void fifo_write(fifo_t *queue, char data)
 {
-    while (fifo_full(fifo))
+    // 如果FIFO已满，自动读取一个字节以腾出空间
+    while (fifo_is_full(queue))
     {
-        fifo_get(fifo);
+        fifo_read(queue);
     }
-    fifo->buf[fifo->head] = byte;
-    fifo->head = fifo_next(fifo, fifo->head);
+    queue->buf[queue->head] = data;
+    queue->head = fifo_next_pos(queue, queue->head);
 }

@@ -1,193 +1,195 @@
 #include "hyc.h"
 
-char *strcpy(char *dest, const char *src)
+char *copy_string(char *destination, const char *source)
 {
-    char *ptr = dest;
+    char *dest_ptr = destination;
     while (true)
     {
-        *ptr++ = *src;
-        if (*src++ == EOS)
-            return dest;
+        *dest_ptr++ = *source;
+        if (*source++ == EOS)
+            return destination;
     }
 }
 
-char *strncpy(char *dest, const char *src, size_t count)
+char *copy_string_n(char *destination, const char *source, size_t max_chars)
 {
-    char *ptr = dest;
-    size_t nr = 0;
-    for (; nr < count; nr++)
+    char *dest_ptr = destination;
+    size_t i = 0;
+    for (; i < max_chars; i++)
     {
-        *ptr++ = *src;
-        if (*src++ == EOS)
-            return dest;
+        *dest_ptr++ = *source;
+        if (*source++ == EOS)
+            return destination;
     }
-    dest[count - 1] = EOS;
-    return dest;
+    destination[max_chars - 1] = EOS;
+    return destination;
 }
 
-char *strcat(char *dest, const char *src)
+char *append_string(char *destination, const char *source)
 {
-    char *ptr = dest;
-    while (*ptr != EOS)
+    char *dest_ptr = destination;
+    while (*dest_ptr != EOS)
     {
-        ptr++;
+        dest_ptr++;
     }
     while (true)
     {
-        *ptr++ = *src;
-        if (*src++ == EOS)
+        *dest_ptr++ = *source;
+        if (*source++ == EOS)
         {
-            return dest;
+            return destination;
         }
     }
 }
 
-size_t strnlen(const char *str, size_t maxlen)
+size_t string_length_n(const char *str, size_t max_length)
 {
-    char *ptr = (char *)str;
-    while (*ptr != EOS && maxlen--)
+    const char *str_ptr = str;
+    while (*str_ptr != EOS && max_length--)
     {
-        ptr++;
+        str_ptr++;
     }
-    return ptr - str;
+    return str_ptr - str;
 }
 
-size_t strlen(const char *str)
+size_t string_length(const char *str)
 {
-    char *ptr = (char *)str;
-    while (*ptr != EOS)
+    const char *str_ptr = str;
+    while (*str_ptr != EOS)
     {
-        ptr++;
+        str_ptr++;
     }
-    return ptr - str;
+    return str_ptr - str;
 }
 
-int strcmp(const char *lhs, const char *rhs)
+int compare_strings(const char *str1, const char *str2)
 {
-    while (*lhs == *rhs && *lhs != EOS && *rhs != EOS)
+    while (*str1 == *str2 && *str1 != EOS && *str2 != EOS)
     {
-        lhs++;
-        rhs++;
+        str1++;
+        str2++;
     }
-    return *lhs < *rhs ? -1 : *lhs > *rhs;
+    return *str1 < *str2 ? -1 : (*str1 > *str2);
 }
 
-char *strchr(const char *str, int ch)
+char *find_char(const char *str, int character)
 {
-    char *ptr = (char *)str;
+    char *str_ptr = (char *)str;
     while (true)
     {
-        if (*ptr == ch)
+        if (*str_ptr == character)
         {
-            return ptr;
+            return str_ptr;
         }
-        if (*ptr++ == EOS)
+        if (*str_ptr++ == EOS)
         {
             return NULL;
         }
     }
 }
 
-char *strrchr(const char *str, int ch)
+char *find_last_char(const char *str, int character)
 {
-    char *last = NULL;
-    char *ptr = (char *)str;
+    char *last_occurrence = NULL;
+    char *str_ptr = (char *)str;
     while (true)
     {
-        if (*ptr == ch)
+        if (*str_ptr == character)
         {
-            last = ptr;
+            last_occurrence = str_ptr;
         }
-        if (*ptr++ == EOS)
+        if (*str_ptr++ == EOS)
         {
-            return last;
+            return last_occurrence;
         }
     }
 }
 
-int memcmp(const void *lhs, const void *rhs, size_t count)
+int compare_memory(const void *mem1, const void *mem2, size_t num)
 {
-    char *lptr = (char *)lhs;
-    char *rptr = (char *)rhs;
-    while ((count > 0) && *lptr == *rptr)
+    const char *mem1_ptr = (char *)mem1;
+    const char *mem2_ptr = (char *)mem2;
+    while ((num > 0) && *mem1_ptr == *mem2_ptr)
     {
-        lptr++;
-        rptr++;
-        count--;
+        mem1_ptr++;
+        mem2_ptr++;
+        num--;
     }
-    if (count == 0)
+    if (num == 0)
         return 0;
-    return *lptr < *rptr ? -1 : *lptr > *rptr;
+    return *mem1_ptr < *mem2_ptr ? -1 : (*mem1_ptr > *mem2_ptr);
 }
 
-void *memset(void *dest, int ch, size_t count)
+void *fill_memory(void *destination, int value, size_t num)
 {
-    char *ptr = dest;
-    while (count--)
+    char *dest_ptr = (char *)destination;
+    while (num--)
     {
-        *ptr++ = ch;
+        *dest_ptr++ = (char)value;
     }
-    return dest;
+    return destination;
 }
 
-void *memcpy(void *dest, const void *src, size_t count)
+void *copy_memory(void *destination, const void *source, size_t num)
 {
-    char *ptr = dest;
-    while (count--)
+    char *dest_ptr = (char *)destination;
+    const char *src_ptr = (const char *)source;
+    while (num--)
     {
-        *ptr++ = *((char *)(src++));
+        *dest_ptr++ = *src_ptr++;
     }
-    return dest;
+    return destination;
 }
 
-void *memchr(const void *str, int ch, size_t count)
+void *find_memory(const void *str, int value, size_t num)
 {
-    char *ptr = (char *)str;
-    while (count--)
+    const char *str_ptr = (const char *)str;
+    while (num--)
     {
-        if (*ptr == ch)
+        if (*str_ptr == value)
         {
-            return (void *)ptr;
+            return (void *)str_ptr;
         }
-        ptr++;
+        str_ptr++;
     }
+    return NULL;
 }
 
-#define SEPARATOR1 '/'                                       // 目录分隔符 1
-#define SEPARATOR2 '\\'                                      // 目录分隔符 2
-#define IS_SEPARATOR(c) (c == SEPARATOR1 || c == SEPARATOR2) // 字符是否位目录分隔符
+#define PATH_SEPARATOR_1 '/'                                   // 目录分隔符 1
+#define PATH_SEPARATOR_2 '\\'                                  // 目录分隔符 2
+#define IS_PATH_SEPARATOR(c) (c == PATH_SEPARATOR_1 || c == PATH_SEPARATOR_2) // 判断字符是否为目录分隔符
 
-// 获取第一个分隔符
-char *strsep(const char *str)
+// 获取字符串中第一个路径分隔符的位置
+char *find_separator(const char *str)
 {
-    char *ptr = (char *)str;
+    const char *str_ptr = str;
     while (true)
     {
-        if (IS_SEPARATOR(*ptr))
+        if (IS_PATH_SEPARATOR(*str_ptr))
         {
-            return ptr;
+            return (char *)str_ptr;
         }
-        if (*ptr++ == EOS)
+        if (*str_ptr++ == EOS)
         {
             return NULL;
         }
     }
 }
 
-// 获取最后一个分隔符
-char *strrsep(const char *str)
+// 获取字符串中最后一个路径分隔符的位置
+char *find_last_separator(const char *str)
 {
-    char *last = NULL;
-    char *ptr = (char *)str;
+    char *last_sep = NULL;
+    const char *str_ptr = str;
     while (true)
     {
-        if (IS_SEPARATOR(*ptr))
+        if (IS_PATH_SEPARATOR(*str_ptr))
         {
-            last = ptr;
+            last_sep = (char *)str_ptr;
         }
-        if (*ptr++ == EOS)
+        if (*str_ptr++ == EOS)
         {
-            return last;
+            return last_sep;
         }
     }
 }

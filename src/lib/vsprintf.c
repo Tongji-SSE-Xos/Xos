@@ -1,453 +1,340 @@
-/* vsprintf.c -- Lars Wirzenius & Linus Torvalds. */
-/*
- * Wirzenius wrote this portably, Torvalds fucked it up :-)
- */
-
 #include "hyc.h"
 
-#define ZEROPAD 0x01 // 填充零
-#define SIGN 0x02    // unsigned/signed long
-#define PLUS 0x04    // 显示加
-#define SPACE 0x08   // 如是加，则置空格
-#define LEFT 0x10    // 左调整
-#define SPECIAL 0x20 // 0x
-#define SMALL 0x40   // 使用小写字母
-#define DOUBLE 0x80  // 浮点数
+#define PAD_ZERO 0x01   // Zero padding
+#define IS_SIGNED 0x02  // Signed/unsigned long
+#define SHOW_PLUS 0x04  // Show plus sign
+#define SPACE_PAD 0x08  // Pad space if no sign
+#define ALIGN_LEFT 0x10 // Left alignment
+#define IS_SPECIAL 0x20 // 0x or 0 prefix
+#define USE_LOWER 0x40  // Use lowercase letters
+#define IS_DOUBLE 0x80  // Floating-point number
 
-#define is_digit(c) ((c) >= '0' && (c) <= '9')
+#define is_num(c) ((c) >= '0' && (c) <= '9')
 
-// 将字符数字串转换成整数，并将指针前移
-static int skip_atoi(const char **s)
+static int extract_int(const char **s)
 {
-    int i = 0;
-    while (is_digit(**s))
-        i = i * 10 + *((*s)++) - '0';
-    return i;
+    int result = 0;
+    while (is_num(**s))
+        result = result * 10 + *((*s)++) - '0';
+    return result;
 }
 
-// 将整数转换为指定进制的字符串
-// str - 输出字符串指针
-// num - 整数
-// base - 进制基数
-// size - 字符串长度
-// precision - 数字长度(精度)
-// flags - 选项
-static char *number(char *str, u32 *num, int base, int size, int precision, int flags)
+static char *convert_number(char *str, u32 *value, int radix, int width, int precision, int options)
 {
-    char pad, sign, tmp[36];
-    const char *digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    int i;
-    int index;
-    char *ptr = str;
+    char pad_char, sign_char, buffer[36];
+    const char *digit_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    int len;
+    int idx;
+    char *output = str;
 
-    // 如果 flags 指出用小写字母，则定义小写字母集
-    if (flags & SMALL)
-        digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+    if (options & USE_LOWER)
+        digit_chars = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-    // 如果 flags 指出要左对齐，则屏蔽类型中的填零标志
-    if (flags & LEFT)
-        flags &= ~ZEROPAD;
+    if (options & ALIGN_LEFT)
+        options &= ~PAD_ZERO;
 
-    // 如果进制基数小于 2 或大于 36，则退出处理
-    // 也即本程序只能处理基数在 2-32 之间的数
-    if (base < 2 || base > 36)
+    if (radix < 2 || radix > 36)
         return 0;
 
-    // 如果 flags 指出要填零，则置字符变量 c='0'，否则 c 等于空格字符
-    pad = (flags & ZEROPAD) ? '0' : ' ';
+    pad_char = (options & PAD_ZERO) ? '0' : ' ';
 
-    // 如果 flags 指出是带符号数并且数值 num 小于 0，则置符号变量 sign=负号，并使 num 取绝对值
-    if (flags & DOUBLE && (*(double *)(num)) < 0)
+    if (options & IS_DOUBLE && (*(double *)(value)) < 0)
     {
-        sign = '-';
-        *(double *)(num) = -(*(double *)(num));
+        sign_char = '-';
+        *(double *)(value) = -(*(double *)(value));
     }
-    else if (flags & SIGN && !(flags & DOUBLE) && ((int)(*num)) < 0)
+    else if (options & IS_SIGNED && !(options & IS_DOUBLE) && ((int)(*value)) < 0)
     {
-        sign = '-';
-        (*num) = -(int)(*num);
+        sign_char = '-';
+        (*value) = -(int)(*value);
     }
     else
-        // 否则如果 flags 指出是加号，则置 sign=加号，否则若类型带空格标志则 sign=空格，否则置 0
-        sign = (flags & PLUS) ? '+' : ((flags & SPACE) ? ' ' : 0);
+        sign_char = (options & SHOW_PLUS) ? '+' : ((options & SPACE_PAD) ? ' ' : 0);
 
-    // 若带符号，则宽度值减 1
-    if (sign)
-        size--;
+    if (sign_char)
+        width--;
 
-    // 若 flags 指出是特殊转换，则对于十六进制宽度再减少 2 位(用于0x)
-    if (flags & SPECIAL)
+    if (options & IS_SPECIAL)
     {
-        if (base == 16)
-            size -= 2;
-        // 对于八进制宽度减 1（用于八进制转换结果前放一个零）
-        else if (base == 8)
-            size--;
+        if (radix == 16)
+            width -= 2;
+        else if (radix == 8)
+            width--;
     }
 
-    i = 0;
+    len = 0;
 
-    // 如果数值 num 为 0，则临时字符串='0'；否则根据给定的基数将数值 num 转换成字符形式
-    if (flags & DOUBLE)
+    if (options & IS_DOUBLE)
     {
-        u32 ival = (u32)(*(double *)num);
-        u32 fval = (u32)(((*(double *)num) - ival) * 1000000);
+        u32 int_part = (u32)(*(double *)value);
+        u32 frac_part = (u32)(((*(double *)value) - int_part) * 1000000);
 
         int mantissa = 6;
-        while (mantissa --)
+        while (mantissa--)
         {
-            index = (fval) % base;
-            (fval) /= base;
-            tmp[i++] = digits[index];
+            idx = (frac_part) % radix;
+            (frac_part) /= radix;
+            buffer[len++] = digit_chars[idx];
         }
 
-        tmp[i++] = '.';
+        buffer[len++] = '.';
 
         do
         {
-            index = (ival) % base;
-            (ival) /= base;
-            tmp[i++] = digits[index];
-        } while (ival);
+            idx = (int_part) % radix;
+            (int_part) /= radix;
+            buffer[len++] = digit_chars[idx];
+        } while (int_part);
     }
-    else if ((*num) == 0)
+    else if ((*value) == 0)
     {
-        tmp[i++] = '0';
+        buffer[len++] = '0';
     }
     else
     {
-        while ((*num) != 0)
+        while ((*value) != 0)
         {
-            index = (*num) % base;
-            (*num) /= base;
-            tmp[i++] = digits[index];
+            idx = (*value) % radix;
+            (*value) /= radix;
+            buffer[len++] = digit_chars[idx];
         }
     }
 
-    // 若数值字符个数大于精度值，则精度值扩展为数字个数值
-    if (i > precision)
-        precision = i;
+    if (len > precision)
+        precision = len;
 
-    // 宽度值 size 减去用于存放数值字符的个数
-    size -= precision;
+    width -= precision;
 
-    // 从这里真正开始形成所需要的转换结果，并暂时放在字符串 str 中
-
-    // 若 flags 中没有填零(ZEROPAD) 和左对齐（左调整）标志
-    // 则在 str 中首先填放剩余宽度值指出的空格数
-    if (!(flags & (ZEROPAD + LEFT)))
-        while (size-- > 0)
+    if (!(options & (PAD_ZERO + ALIGN_LEFT)))
+        while (width-- > 0)
             *str++ = ' ';
 
-    // 若需带符号位，则存入符号
-    if (sign)
-        *str++ = sign;
+    if (sign_char)
+        *str++ = sign_char;
 
-    // 若 flags 指出是特殊转换
-    if (flags & SPECIAL)
+    if (options & IS_SPECIAL)
     {
-        // 则对于八进制转换结果头一位放置一个'0'
-        if (base == 8)
+        if (radix == 8)
             *str++ = '0';
-        // 对于十六进制则存放'0x'
-        else if (base == 16)
+        else if (radix == 16)
         {
             *str++ = '0';
-            *str++ = digits[33];
+            *str++ = digit_chars[33];
         }
     }
-    // 若 flags 中没有左调整（左对齐）标志, 则在剩余宽度中存放 c 字符（'0'或空格）
-    if (!(flags & LEFT))
-        while (size-- > 0)
-            *str++ = pad;
 
-    // 此时 i 存有数值 num 的数字个数
+    if (!(options & ALIGN_LEFT))
+        while (width-- > 0)
+            *str++ = pad_char;
 
-    // 若数字个数小于精度值，则 str 中放入（精度值-i）个'0'
-    while (i < precision--)
+    while (len < precision--)
         *str++ = '0';
 
-    // 将转数值换好的数字字符填入 str 中，共 i 个
-    while (i-- > 0)
-        *str++ = tmp[i];
+    while (len-- > 0)
+        *str++ = buffer[len];
 
-    // 若宽度值仍大于零
-    // 则表示 flags 标志中有左对齐标志标志
-    // 则在剩余宽度中放入空格
-    while (size-- > 0)
+    while (width-- > 0)
         *str++ = ' ';
     return str;
 }
 
-int vsprintf(char *buf, const char *fmt, va_list args)
+int vsnprintf(char *buffer, const char *format, va_list args)
 {
-    int len;
+    int length;
     int i;
-
-    // 用于存放转换过程中的字符串
-    char *str;
-    char *s;
-    int *ip;
-
-    // number() 函数使用的标志
+    char *output;
+    char *str_arg;
+    int *int_arg;
     int flags;
+    int field_width;
+    int precision;
+    int length_modifier;
+    u32 value;
+    u8 *byte_ptr;
 
-    int field_width; // 输出字段宽度
-    int precision;   // min 整数数字个数；max 字符串中字符个数
-    int qualifier;   // 'h', 'l' 或 'L' 用于整数字段
-    u32 num;
-    u8 *ptr;
-
-    // 首先将字符指针指向 buf
-    // 然后扫描格式字符串，
-    // 对各个格式转换指示进行相应的处理
-    for (str = buf; *fmt; ++fmt)
+    for (output = buffer; *format; ++format)
     {
-        // 格式转换指示字符串均以 '%' 开始
-        // 这里从 fmt 格式字符串中扫描 '%'，寻找格式转换字符串的开始
-        // 不是格式指示的一般字符均被依次存入 str
-        if (*fmt != '%')
+        if (*format != '%')
         {
-            *str++ = *fmt;
+            *output++ = *format;
             continue;
         }
 
-        // 下面取得格式指示字符串中的标志域，并将标志常量放入 flags 变量中
         flags = 0;
-    repeat:
-        // 掉过第一个 %
-        ++fmt;
-        switch (*fmt)
+    repeat_flag:
+        ++format;
+        switch (*format)
         {
-        // 左对齐调整
         case '-':
-            flags |= LEFT;
-            goto repeat;
-        // 放加号
+            flags |= ALIGN_LEFT;
+            goto repeat_flag;
         case '+':
-            flags |= PLUS;
-            goto repeat;
-        // 放空格
+            flags |= SHOW_PLUS;
+            goto repeat_flag;
         case ' ':
-            flags |= SPACE;
-            goto repeat;
-        // 是特殊转换
+            flags |= SPACE_PAD;
+            goto repeat_flag;
         case '#':
-            flags |= SPECIAL;
-            goto repeat;
-        // 要填零(即'0')，否则是空格
+            flags |= IS_SPECIAL;
+            goto repeat_flag;
         case '0':
-            flags |= ZEROPAD;
-            goto repeat;
+            flags |= PAD_ZERO;
+            goto repeat_flag;
         }
 
-        // 取当前参数字段宽度域值，放入 field_width 变量中
         field_width = -1;
 
-        // 如果宽度域中是数值则直接取其为宽度值
-        if (is_digit(*fmt))
-            field_width = skip_atoi(&fmt);
-
-        // 如果宽度域中是字符 '*'，表示下一个参数指定宽度
-        else if (*fmt == '*')
+        if (is_num(*format))
+            field_width = extract_int(&format);
+        else if (*format == '*')
         {
-            ++fmt;
-            // 因此调用 va_arg 取宽度值
+            ++format;
             field_width = va_arg(args, int);
 
-            // 若此时宽度值小于 0，则该负数表示其带有标志域 '-' 标志（左对齐）
             if (field_width < 0)
             {
-                // 因此还需在标志变量中添入该标志，并将字段宽度值取为其绝对值
                 field_width = -field_width;
-                flags |= LEFT;
+                flags |= ALIGN_LEFT;
             }
         }
 
-        // 取格式转换串的精度域，并放入 precision 变量中
         precision = -1;
 
-        // 精度域开始的标志是'.' 其处理过程与上面宽度域的类似
-        if (*fmt == '.')
+        if (*format == '.')
         {
-            ++fmt;
-            // 如果精度域中是数值则直接取其为精度值
-            if (is_digit(*fmt))
-                precision = skip_atoi(&fmt);
-
-            // 如果精度域中是字符'*'，表示下一个参数指定精度
-            else if (*fmt == '*')
-            {
-                // 因此调用 va_arg 取精度值
+            ++format;
+            if (is_num(*format))
+                precision = extract_int(&format);
+            else if (*format == '*')
                 precision = va_arg(args, int);
-            }
-            // 若此时宽度值小于 0，则将字段精度值取为其绝对值
             if (precision < 0)
                 precision = 0;
         }
 
-        // 下面这段代码分析长度修饰符，并将其存入 qualifer 变量
-        qualifier = -1;
-        if (*fmt == 'h' || *fmt == 'l' || *fmt == 'L')
+        length_modifier = -1;
+        if (*format == 'h' || *format == 'l' || *format == 'L')
         {
-            qualifier = *fmt;
-            ++fmt;
+            length_modifier = *format;
+            ++format;
         }
 
-        // 下面分析转换指示符
-        switch (*fmt)
+        switch (*format)
         {
-
-        // 如果转换指示符是'c'，则表示对应参数应是字符
         case 'c':
-            // 此时如果标志域表明不是左对齐，
-            if (!(flags & LEFT))
-                // 则该字段前面放入 (宽度域值 - 1) 个空格字符，然后再放入参数字符
+            if (!(flags & ALIGN_LEFT))
                 while (--field_width > 0)
-                    *str++ = ' ';
-            *str++ = (unsigned char)va_arg(args, int);
-            // 如果宽度域还大于 0，则表示为左对齐
-            // 则在参数字符后面添加 (宽度值-1) 个空格字符
+                    *output++ = ' ';
+            *output++ = (unsigned char)va_arg(args, int);
             while (--field_width > 0)
-                *str++ = ' ';
+                *output++ = ' ';
             break;
 
-        // 如果转换指示符是 's'，则表示对应参数是字符串
         case 's':
-            s = va_arg(args, char *);
-            // 首先取参数字符串的长度
-            len = strlen(s);
-            // 若其超过了精度域值, 则扩展精度域=字符串长度
+            str_arg = va_arg(args, char *);
+            length = strlen(str_arg);
             if (precision < 0)
-                precision = len;
-            else if (len > precision)
-                len = precision;
+                precision = length;
+            else if (length > precision)
+                length = precision;
 
-            // 此时如果标志域表明不是左对齐
-            if (!(flags & LEFT))
-                // 则该字段前放入 (宽度值-字符串长度) 个空格字符
-                while (len < field_width--)
-                    *str++ = ' ';
-            // 然后再放入参数字符串
-            for (i = 0; i < len; ++i)
-                *str++ = *s++;
-            // 如果宽度域还大于 0，则表示为左对齐
-            // 则在参数字符串后面，添加(宽度值-字符串长度)个空格字符
-            while (len < field_width--)
-                *str++ = ' ';
+            if (!(flags & ALIGN_LEFT))
+                while (length < field_width--)
+                    *output++ = ' ';
+            for (i = 0; i < length; ++i)
+                *output++ = *str_arg++;
+            while (length < field_width--)
+                *output++ = ' ';
             break;
 
-        // 如果格式转换符是'o'，表示需将对应的参数转换成八进制数的字符串
         case 'o':
-            num = va_arg(args, unsigned long);
-            str = number(str, &num, 8, field_width, precision, flags);
+            value = va_arg(args, unsigned long);
+            output = convert_number(output, &value, 8, field_width, precision, flags);
             break;
 
-        // 如果格式转换符是'p'，表示对应参数的一个指针类型
         case 'p':
-            // 此时若该参数没有设置宽度域，则默认宽度为 8，并且需要添零
             if (field_width == -1)
             {
                 field_width = 8;
-                flags |= ZEROPAD;
+                flags |= PAD_ZERO;
             }
-            num = va_arg(args, unsigned long);
-            str = number(str, &num, 16, field_width, precision, flags);
+            value = va_arg(args, unsigned long);
+            output = convert_number(output, &value, 16, field_width, precision, flags);
             break;
 
-        // 若格式转换指示是 'x' 或 'X'
-        // 则表示对应参数需要打印成十六进制数输出
         case 'x':
-            // 'x'表示用小写字母表示
-            flags |= SMALL;
+            flags |= USE_LOWER;
         case 'X':
-            num = va_arg(args, unsigned long);
-            str = number(str, &num, 16, field_width, precision, flags);
+            value = va_arg(args, unsigned long);
+            output = convert_number(output, &value, 16, field_width, precision, flags);
             break;
 
-        // 如果格式转换字符是'd', 'i' 或 'u'，则表示对应参数是整数
         case 'd':
         case 'i':
-            // 'd', 'i'代表符号整数，因此需要加上带符号标志
-            flags |= SIGN;
-        // 'u'代表无符号整数
+            flags |= IS_SIGNED;
         case 'u':
-            num = va_arg(args, unsigned long);
-            str = number(str, &num, 10, field_width, precision, flags);
+            value = va_arg(args, unsigned long);
+            output = convert_number(output, &value, 10, field_width, precision, flags);
             break;
 
-        // 若格式转换指示符是 'n'
-        // 表示要把到目前为止转换输出的字符数保存到对应参数指针指定的位置中
         case 'n':
-            // 首先利用 va_arg() 取得该参数指针
-            ip = va_arg(args, int *);
-            // 然后将已经转换好的字符数存入该指针所指的位置
-            *ip = (str - buf);
+            int_arg = va_arg(args, int *);
+            *int_arg = (output - buffer);
             break;
         case 'f':
-            flags |= SIGN;
-            flags |= DOUBLE;
-            double dnum = va_arg(args, double);
-            str = number(str, (u32 *)&dnum, 10, field_width, precision, flags);
+            flags |= IS_SIGNED | IS_DOUBLE;
+            double dvalue = va_arg(args, double);
+            output = convert_number(output, (u32 *)&dvalue, 10, field_width, precision, flags);
             break;
-        case 'b': // binary
-            num = va_arg(args, unsigned long);
-            str = number(str, &num, 2, field_width, precision, flags);
+        case 'b': 
+            value = va_arg(args, unsigned long);
+            output = convert_number(output, &value, 2, field_width, precision, flags);
             break;
-        case 'm': // mac address
-            flags |= SMALL | ZEROPAD;
-            ptr = va_arg(args, char *);
-            for (size_t t = 0; t < 6; t++, ptr++)
+        case 'm': 
+            flags |= USE_LOWER | PAD_ZERO;
+            byte_ptr = va_arg(args, char *);
+            for (size_t j = 0; j < 6; j++, byte_ptr++)
             {
-                int num = *ptr;
-                str = number(str, &num, 16, 2, precision, flags);
-                *str = ':';
-                str++;
+                int temp = *byte_ptr;
+                output = convert_number(output, &temp, 16, 2, precision, flags);
+                *output = ':';
+                output++;
             }
-            str--;
+            output--;
             break;
-        case 'r': // ip address
-            flags |= SMALL;
-            ptr = va_arg(args, u8 *);
-            for (size_t t = 0; t < 4; t++, ptr++)
+        case 'r':
+            flags |= USE_LOWER | PAD_ZERO;
+            byte_ptr = va_arg(args, char *);
+            for (size_t j = 0; j < 4; j++, byte_ptr++)
             {
-                int num = *ptr;
-                str = number(str, &num, 10, field_width, precision, flags);
-                *str = '.';
-                str++;
+                int temp = *byte_ptr;
+                output = convert_number(output, &temp, 10, 2, precision, flags);
+                *output = '.';
+                output++;
             }
-            str--;
+            output--;
             break;
+
         default:
-            // 若格式转换符不是 '%'，则表示格式字符串有错
-            if (*fmt != '%')
-                // 直接将一个 '%' 写入输出串中
-                *str++ = '%';
-            // 如果格式转换符的位置处还有字符，则也直接将该字符写入输出串中
-            // 然后继续循环处理格式字符串
-            if (*fmt)
-                *str++ = *fmt;
+            if (*format != '%')
+                *output++ = '%';
+            if (*format)
+                *output++ = *format;
             else
-                // 否则表示已经处理到格式字符串的结尾处，则退出循环
-                --fmt;
+                --format;
             break;
         }
     }
-    // 最后在转换好的字符串结尾处添上字符串结束标志
-    *str = '\0';
-
-    // 返回转换好的字符串长度值
-    i = str - buf;
-    assert(i < 1024);
-    return i;
+    *output = '\0';
+    return output - buffer;
 }
 
-// 结果按格式输出字符串到 buf
-int sprintf(char *buf, const char *fmt, ...)
+int snprintf(char *str, const char *fmt, ...)
 {
     va_list args;
+    int n;
+
     va_start(args, fmt);
-    int i = vsprintf(buf, fmt, args);
+    n = vsnprintf(str, fmt, args);
     va_end(args);
-    return i;
+    return n;
 }
